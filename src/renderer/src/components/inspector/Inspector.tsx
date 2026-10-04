@@ -1,0 +1,49 @@
+import { useState, type ReactNode } from 'react'
+import { SlidersHorizontal, X } from 'lucide-react'
+import { IconButton, Tabs } from '@/components/ui'
+import { RuntimePanel } from './RuntimePanel'
+import { SamplingPanel } from './SamplingPanel'
+import { SystemPanel } from './SystemPanel'
+import { useT } from '@/i18n'
+import { useChatStore } from '@/stores/chat'
+import { useUiStore } from '@/stores/ui'
+
+type InspectorTab = 'sampling' | 'runtime' | 'system'
+
+/** Right-hand panel: everything that controls how the model runs and answers. */
+export function Inspector(): ReactNode {
+  const t = useT()
+  const toggleInspector = useUiStore((state) => state.toggleInspector)
+  const conversationId = useChatStore((state) => state.conversation?.id ?? null)
+  const [tab, setTab] = useState<InspectorTab>('sampling')
+
+  return (
+    <aside className="flex h-full w-[330px] shrink-0 flex-col border-l border-border bg-surface">
+      <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <SlidersHorizontal className="size-3.5 text-brand" />
+        <span className="flex-1 text-xs font-semibold text-fg">{t('params.title')}</span>
+        <IconButton label={t('common.close')} onClick={toggleInspector} className="size-7">
+          <X className="size-3.5" />
+        </IconButton>
+      </header>
+
+      <div className="border-b border-border p-3">
+        <Tabs<InspectorTab>
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: 'sampling', label: t('params.sampling') },
+            { value: 'runtime', label: t('params.runtime') },
+            { value: 'system', label: t('params.systemPrompt') }
+          ]}
+        />
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
+        {tab === 'sampling' ? <SamplingPanel /> : null}
+        {tab === 'runtime' ? <RuntimePanel /> : null}
+        {tab === 'system' ? <SystemPanel key={conversationId ?? 'none'} /> : null}
+      </div>
+    </aside>
+  )
+}

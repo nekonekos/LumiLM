@@ -1,0 +1,36 @@
+appId: dev.lumilm.app
+productName: LumiLM
+copyright: Copyright © 2026 nekonekos
+
+directories:
+  buildResources: build
+  output: release
+
+# The renderer is fully bundled, so no runtime dependencies need to be shipped.
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+
+# llama.cpp binaries must stay outside the asar archive so they can be spawned.
+extraResources:
+  - from: resources/llama
+    to: llama
+    filter:
+      - '**/*'
+
+asar: true
+# The archive is ~6 GB unpacked, which needs a lot of headroom for the zip step.
+compression: normal
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: zip
+      arch:
+        - x64
+  # No installer: LumiLM is distributed as a portable, self-contained folder.
+  artifactName: LumiLM-${version}-win-x64-portable.${ext}
+
+# Portable builds are not code signed, so skip the update metadata.
+publish: null

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LumiLM</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://localhost:*; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <script>
+      // Applied before first paint so the window never flashes the wrong theme.
+      (function () {
+        try {
+          var stored = localStorage.getItem('lumilm.theme')
+          var mode = stored === 'light' || stored === 'dark' ? stored : null
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          var resolved = mode ?? (prefersDark ? 'dark' : 'light')
+          document.documentElement.dataset.theme = resolved
+          document.documentElement.style.colorScheme = resolved
+          var accent = localStorage.getItem('lumilm.accent')
+          if (accent) document.documentElement.style.setProperty('--lm-accent', accent)
+        } catch (error) {
+          /* ignore */
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
