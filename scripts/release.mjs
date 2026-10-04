@@ -2,7 +2,11 @@
 /**
  * Builds the Windows portable zip and publishes it as a GitHub release.
  *
- *   node scripts/release.mjs [--version 0.1.0] [--notes "…"] [--dry-run] [--skip-build]
+ *   node scripts/release.mjs [--version 0.1.1] [--notes "…"] [--dry-run] [--skip-build]
+ *
+ * The release notes default to the matching section of CHANGELOG.md; pass
+ * `--notes` only to override them. Prefer writing them into CHANGELOG.md, since
+ * a multi-line value cannot survive `npm run release -- --notes=…`.
  *
  * The llama.cpp binaries are not stored in git, so they are fetched on demand
  * (unless they are already present in resources/llama).
@@ -78,6 +82,22 @@ function ensureBackends() {
   }
 }
 
+/** Release notes for `version`, taken from CHANGELOG.md so they stay in sync. */
+function changelogNotes(version) {
+  const file = join(ROOT, 'CHANGELOG.md')
+  if (!existsSync(file)) return null
+
+  const lines = readFileSync(file, 'utf8').split('\n')
+  const heading = new RegExp(`^##\\s*\\[?${version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]?`)
+  const start = lines.findIndex((line) => heading.test(line.trim()))
+  if (start === -1) return null
+
+  const rest = lines.slice(start + 1)
+  const end = rest.findIndex((line) => /^##\s/.test(line))
+  const section = rest.slice(0, end === -1 ? rest.length : end).join('\n').trim()
+  return section.length > 0 ? section : null
+}
+
 function findArtifact(version) {
   if (!existsSync(RELEASE_DIR)) return null
   // Only look at builds of the version being released: a stale zip from an
@@ -128,7 +148,7 @@ if (dryRun) {
   process.exit(0)
 }
 
-const notes = notesArg ?? `LumiLM ${tag} — Windows x64 portable build.`
+const notes = notesArg ?? changelogNotes(version) ?? `LumiLM ${tag} — Windows x64 portable build.`
 
 const releaseArgs = [
   'release',
