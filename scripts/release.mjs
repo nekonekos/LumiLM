@@ -30,7 +30,9 @@ function log(message) {
 
 function run(command, commandArgs, options = {}) {
   log(`${command} ${commandArgs.join(' ')}`)
-  return execFileSync(command, commandArgs, { stdio: 'inherit', cwd: ROOT, ...options })
+  // Node refuses to spawn a .cmd/.bat without a shell on Windows (EINVAL).
+  const shell = /\.(cmd|bat)$/i.test(command)
+  return execFileSync(command, commandArgs, { stdio: 'inherit', cwd: ROOT, shell, ...options })
 }
 
 function pkg() {
