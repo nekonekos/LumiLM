@@ -76,9 +76,14 @@ function ensureBackends() {
   }
 }
 
-function findArtifact() {
+function findArtifact(version) {
   if (!existsSync(RELEASE_DIR)) return null
-  const match = readdirSync(RELEASE_DIR).find((name) => /-portable\.zip$/i.test(name))
+  // Only look at builds of the version being released: a stale zip from an
+  // earlier version would otherwise be picked up and uploaded.
+  const prefix = `LumiLM-${version}-`
+  const match = readdirSync(RELEASE_DIR).find(
+    (name) => name.startsWith(prefix) && /-portable\.zip$/i.test(name)
+  )
   return match ? join(RELEASE_DIR, match) : null
 }
 
@@ -104,8 +109,8 @@ if (!skipBuild) {
   ])
 }
 
-const artifact = findArtifact()
-if (!artifact) throw new Error(`no *-portable.zip found in ${RELEASE_DIR}`)
+const artifact = findArtifact(version)
+if (!artifact) throw new Error(`no ${tag} portable zip found in ${RELEASE_DIR}`)
 
 const stats = statSync(artifact)
 const hash = sha256(artifact)
