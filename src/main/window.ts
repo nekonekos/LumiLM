@@ -1,6 +1,7 @@
 import { BrowserWindow, nativeTheme, screen, shell, type WebContents } from 'electron'
 import { join } from 'node:path'
 import type { ThemeMode } from '@shared/types'
+import { applyWindowIcon, appIcon, currentIconTheme } from './app-icon'
 import { settingsStore } from './store/settings'
 import { logger } from './util/logger'
 
@@ -18,6 +19,8 @@ function overlayColors(): { color: string; symbolColor: string } {
 
 export function applyThemeSource(themeMode: ThemeMode): void {
   nativeTheme.themeSource = themeMode
+  // The mark has a light and a dark variant, so it has to follow the theme too.
+  applyWindowIcon()
   for (const window of BrowserWindow.getAllWindows()) {
     try {
       window.setBackgroundColor(
@@ -61,6 +64,8 @@ export function createMainWindow(): BrowserWindow {
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     show: false,
+    // Replaced at runtime whenever the effective theme changes.
+    icon: appIcon(currentIconTheme()),
     backgroundColor: overlayColors().color,
     titleBarStyle: 'hidden',
     titleBarOverlay: { ...overlayColors(), height: 38 },

@@ -52,7 +52,9 @@ npm install
 # Fetch the prebuilt llama.cpp backends (~1.2 GB, once)
 npm run fetch:llama
 
-# Generate the application icons
+# Icons: build/icons/{light,dark}/ are the sources; this derives build/icon.ico and
+# src/shared/app-icons.ts. `npm run build` runs it for you, so it is only needed
+# after replacing the artwork.
 npm run icon
 
 # Development
@@ -67,8 +69,25 @@ npm test
 npm run dist
 
 # Build and publish a GitHub release (requires an authenticated gh)
-npm run release -- --version=0.1.0
+npm run release -- --version=0.1.1
 ```
+
+### About the icons
+
+There are two colourways, one for each theme:
+
+```
+build/icons/
+├── light/   light theme mark (also baked into LumiLM.exe and the portable zip)
+│   └── 16.png 32.png 64.png 128.png 256.png
+└── dark/    dark theme mark (title bar, taskbar, in-app logo)
+    └── 16.png 32.png 64.png 128.png 256.png
+```
+
+`npm run icon` reads both folders and writes `build/icon.ico` (used by the packager,
+always the light mark), `build/icon.png`, and `src/shared/app-icons.ts` — inlined data
+URLs that let the main process swap the window icon and the renderer swap the in-app
+logo and favicon as the theme changes.
 
 ### About the llama.cpp backends
 

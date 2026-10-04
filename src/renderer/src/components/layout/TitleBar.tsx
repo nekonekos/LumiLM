@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Moon, PanelLeft, PanelRight, ScrollText, Settings as SettingsIcon, Sun } from 'lucide-react'
+import { APP_ICONS } from '@shared/app-icons'
 import { IconButton, Spinner } from '@/components/ui'
 import { useT } from '@/i18n'
 import { cn } from '@/lib/cn'
@@ -75,9 +76,12 @@ export function TitleBar(): ReactNode {
       </IconButton>
 
       <div className="flex shrink-0 items-center gap-2 pl-1">
-        <span className="grid size-6 place-items-center rounded-[8px] bg-linear-to-br from-[#8fd0ff] to-[#2b6ce8] text-[11px] font-bold text-white">
-          L
-        </span>
+        <img
+          src={APP_ICONS[resolvedTheme]}
+          alt=""
+          className="size-6 shrink-0 select-none rounded-[7px]"
+          draggable={false}
+        />
         <span className="text-[13px] font-semibold tracking-tight text-fg">LumiLM</span>
       </div>
 

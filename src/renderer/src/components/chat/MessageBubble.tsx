@@ -13,6 +13,7 @@ import { Button, IconButton, TextArea } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import { formatDuration, formatSpeed } from '@/lib/format'
 import { useImageDataUrl } from '@/hooks/useImageDataUrl'
+import { useAppIcon } from '@/hooks/useAppIcon'
 import { useT } from '@/i18n'
 import { MarkdownView } from './MarkdownView'
 
@@ -94,6 +95,7 @@ export const MessageBubble = memo(function MessageBubble({
   onDelete
 }: MessageBubbleProps): ReactNode {
   const t = useT()
+  const appIcon = useAppIcon()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
   const [copied, setCopied] = useState(false)
@@ -191,11 +193,15 @@ export const MessageBubble = memo(function MessageBubble({
         <div className="flex items-center gap-2">
           <span
             className={cn(
-              'grid size-6 place-items-center rounded-full text-[10px] font-bold text-white',
-              isUser ? 'bg-brand' : 'bg-linear-to-br from-[#8fd0ff] to-[#2b6ce8]'
+              'grid size-6 place-items-center overflow-hidden rounded-full text-[10px] font-bold text-white',
+              isUser ? 'bg-brand' : null
             )}
           >
-            {isUser ? t('chat.you').slice(0, 1) : 'L'}
+            {isUser ? (
+              t('chat.you').slice(0, 1)
+            ) : (
+              <img src={appIcon} alt="" className="size-6 select-none" draggable={false} />
+            )}
           </span>
           <span className="text-xs font-semibold text-fg-muted">
             {isUser ? t('chat.you') : t('chat.assistant')}

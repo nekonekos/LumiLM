@@ -9,6 +9,7 @@ import { StatusBar } from '@/components/layout/StatusBar'
 import { TitleBar } from '@/components/layout/TitleBar'
 import { ToastHost } from '@/components/layout/ToastHost'
 import { Spinner } from '@/components/ui'
+import { useAppIcon } from '@/hooks/useAppIcon'
 import { useBootstrap } from '@/hooks/useBootstrap'
 import { useT } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
@@ -28,6 +29,7 @@ function readOnboarded(): boolean {
 
 export function App(): ReactNode {
   const t = useT()
+  const appIcon = useAppIcon()
   const { loading, error } = useBootstrap()
 
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed)
@@ -89,9 +91,12 @@ export function App(): ReactNode {
   if (loading || !settingsReady) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-bg text-fg-muted">
-        <span className="grid size-11 place-items-center rounded-[14px] bg-linear-to-br from-[#8fd0ff] to-[#2b6ce8] text-lg font-bold text-white">
-          L
-        </span>
+        <img
+          src={appIcon}
+          alt="LumiLM"
+          className="size-11 shrink-0 select-none rounded-[14px]"
+          draggable={false}
+        />
         <span className="flex items-center gap-2 text-sm">
           <Spinner className="size-4" />
           {t('status.starting')}

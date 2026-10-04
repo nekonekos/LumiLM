@@ -52,7 +52,8 @@ npm install
 # 下载 llama.cpp 预编译后端（约 1.2 GB，只需执行一次）
 npm run fetch:llama
 
-# 生成应用图标
+# 图标：build/icons/{light,dark}/ 为源文件，生成 build/icon.ico 与 src/shared/app-icons.ts
+# （已被 `npm run build` 自动调用，仅在替换美术资源后需要手动执行）
 npm run icon
 
 # 开发模式
@@ -67,8 +68,24 @@ npm test
 npm run dist
 
 # 构建并发布到 GitHub Release（需要 gh 已登录）
-npm run release -- --version=0.1.0
+npm run release -- --version=0.1.1
 ```
+
+### 关于图标
+
+应用图标有两套配色，分别用于浅色与深色主题：
+
+```
+build/icons/
+├── light/   浅色主题图标（同时用作 LumiLM.exe 与便携包图标）
+│   └── 16.png 32.png 64.png 128.png 256.png
+└── dark/    深色主题图标（窗口标题栏、任务栏、应用内 logo）
+    └── 16.png 32.png 64.png 128.png 256.png
+```
+
+`npm run icon` 会读取这两个目录，生成 `build/icon.ico`（打包用，固定为浅色版本）、
+`build/icon.png` 以及 `src/shared/app-icons.ts`（内联 data URL，供主进程的窗口图标
+与渲染进程的应用内 logo / favicon 按主题切换使用）。
 
 ### 关于 llama.cpp 后端
 

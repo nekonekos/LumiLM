@@ -217,8 +217,11 @@ export function Composer(): ReactNode {
             onPaste={handlePaste}
             placeholder={activeModel ? t('chat.placeholder') : t('chat.placeholderNoModel')}
             className={cn(
-              'max-h-60 min-h-[34px] flex-1 resize-none bg-transparent py-1.5 text-sm leading-relaxed',
-              'text-fg outline-none placeholder:text-fg-subtle'
+              // The rounded container is the only visible frame: the field itself
+              // stays borderless so it grows into a rounded rectangle when it wraps.
+              'max-h-60 min-h-[34px] flex-1 resize-none rounded-[11px] bg-transparent px-1 py-1.5',
+              'text-sm leading-relaxed text-fg outline-none',
+              'focus:outline-none focus-visible:outline-none placeholder:text-fg-subtle'
             )}
           />
 

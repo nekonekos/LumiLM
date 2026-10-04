@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ExternalLink, FolderOpen, ScrollText, Trash2 } from 'lucide-react'
+import { ExternalLink, FolderOpen, GitFork, Globe, ScrollText, Trash2 } from 'lucide-react'
 import type { AppInfo, AppPaths, Locale, LogLevel, ThemeMode } from '@shared/types'
 import {
   Button,
@@ -14,6 +14,7 @@ import {
 import { formatNumber } from '@/lib/format'
 import { ModelManager } from '@/components/models/ModelManager'
 import { RuntimePanel } from '@/components/inspector/RuntimePanel'
+import { useAppIcon } from '@/hooks/useAppIcon'
 import { useT } from '@/i18n'
 import { useModelsStore } from '@/stores/models'
 import { useSettingsStore } from '@/stores/settings'
@@ -23,6 +24,7 @@ const ACCENTS = ['#2f6fe8', '#3b82f6', '#0ea5e9', '#14b8a6', '#8b5cf6', '#ec4899
 
 export function SettingsDialog(): ReactNode {
   const t = useT()
+  const appIcon = useAppIcon()
   const open = useUiStore((state) => state.settingsOpen)
   const tab = useUiStore((state) => state.settingsTab)
   const close = useUiStore((state) => state.closeSettings)
@@ -308,7 +310,65 @@ export function SettingsDialog(): ReactNode {
             <div className="flex flex-col gap-5">
               <section className="flex flex-col gap-2">
                 <SectionTitle>{t('app.name')}</SectionTitle>
-                <p className="text-xs leading-relaxed text-fg-muted">{t('app.tagline')}</p>
+                <div className="flex items-center gap-3">
+                  <img
+                    src={appIcon}
+                    alt=""
+                    className="size-11 shrink-0 select-none rounded-[14px] border border-border"
+                  />
+                  <p className="text-xs leading-relaxed text-fg-muted">{t('app.tagline')}</p>
+                </div>
+              </section>
+
+              <section className="flex flex-col gap-2.5 rounded-[12px] border border-border bg-surface-2 p-3.5">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={appIcon}
+                    alt=""
+                    className="size-9 shrink-0 select-none rounded-[11px]"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-fg">LumiNya</p>
+                    <p className="text-[11px] text-fg-subtle">
+                      {t('settings.author')} · {t('app.name')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void window.lumilm.app.openExternal('https://luminya.cc')}
+                  >
+                    <Globe className="size-3.5" />
+                    luminya.cc
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      void window.lumilm.app.openExternal('https://github.com/nekonekos/LumiLM')
+                    }
+                  >
+                    <GitFork className="size-3.5" />
+                    nekonekos/LumiLM
+                  </Button>
+                </div>
+
+                <div className="flex flex-col gap-1 text-[11px]">
+                  <span className="text-fg-subtle">{t('settings.website')}</span>
+                  <span className="font-mono text-fg-muted">https://luminya.cc</span>
+                  <span className="mt-1 text-fg-subtle">{t('settings.repository')}</span>
+                  <span className="font-mono text-fg-muted">
+                    https://github.com/nekonekos/LumiLM
+                  </span>
+                </div>
+
+                <blockquote className="rounded-[10px] border-l-2 border-brand bg-surface px-3 py-2">
+                  <p className="text-[11px] text-fg-subtle">{t('settings.quote')}</p>
+                  <p className="mt-0.5 text-sm font-medium text-brand italic">love with love.</p>
+                </blockquote>
               </section>
 
               <section className="flex flex-col gap-1.5 text-[11px]">

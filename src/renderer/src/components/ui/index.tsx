@@ -2,13 +2,16 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type Ref,
   type TextareaHTMLAttributes
 } from 'react'
-import { X } from 'lucide-react'
+import { Check, ChevronDown, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/cn'
 
 /* ------------------------------------------------------------------ */
@@ -143,7 +146,11 @@ export function Badge({
 export function ProgressBar({ value, className }: { value: number; className?: string }): ReactNode {
   const percent = Math.max(0, Math.min(1, value)) * 100
   return (
-    <div className={cn('h-1.5 w-full overflow-hidden rounded-full bg-surface-3', className)}>
+    // Note: no `w-full` in the base classes. `cn` is a plain joiner rather than a
+    // tailwind-merge, so a hardcoded width would fight the caller's own width
+    // utility and win depending on stylesheet order. A block-level element
+    // already fills its container, so omitting the width is a safe default.
+    <div className={cn('h-1.5 overflow-hidden rounded-full bg-surface-3', className)}>
       <div
         className="h-full rounded-full bg-brand transition-[width] duration-300"
         style={{ width: `${percent}%` }}
@@ -257,6 +264,36 @@ export interface SelectOption<T extends string | number> {
   disabled?: boolean
 }
 
+const OPTION_HEIGHT_PX = 34
+const MAX_LIST_HEIGHT_PX = 240
+
+/** Moves `index` in `direction`, skipping disabled options. */
+function stepOption<T extends string | number>(
+  options: Array<SelectOption<T>>,
+  index: number,
+  direction: 1 | -1
+): number {
+  for (let next = index + direction; next >= 0 && next < options.length; next += direction) {
+    if (!options[next]?.disabled) return next
+  }
+  return index
+}
+
+interface PopupBox {
+  top: number
+  left: number
+  width: number
+  maxHeight: number
+}
+
+/**
+ * Custom listbox. The native `<select>` popup is drawn by the operating system
+ * and cannot be themed, so the trigger and the option list are rendered here.
+ *
+ * The list is portalled to `document.body` and positioned from the trigger's
+ * bounding box, because an in-flow popup would be clipped by the scrolling
+ * panels the selects usually live in.
+ */
 export function Select<T extends string | number>({
   value,
   options,
@@ -270,28 +307,194 @@ export function Select<T extends string | number>({
   disabled?: boolean
   className?: string
 }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [box, setBox] = useState<PopupBox | null>(null)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const selectedIndex = options.findIndex((option) => option.value === value)
+  const selected = selectedIndex >= 0 ? options[selectedIndex] : undefined
+
+  const close = useCallback(() => {
+    setOpen(false)
+  }, [])
+
+  const measure = useCallback(() => {
+    const trigger = triggerRef.current
+    if (!trigger) return
+
+    const rect = trigger.getBoundingClientRect()
+    const listHeight = Math.min(MAX_LIST_HEIGHT_PX, options.length * OPTION_HEIGHT_PX + 8)
+    const spaceBelow = window.innerHeight - rect.bottom
+    const openUp = spaceBelow < listHeight + 8 && rect.top > spaceBelow
+
+    setBox({
+      top: openUp ? Math.max(8, rect.top - listHeight - 4) : rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+      maxHeight: listHeight
+    })
+  }, [options.length])
+
+  useEffect(() => {
+    if (!open) return
+
+    measure()
+
+    const handlePointerDown = (event: MouseEvent): void => {
+      const target = event.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (listRef.current?.contains(target)) return
+      close()
+    }
+
+    // `capture` so scrolling inside the surrounding panels is observed too.
+    window.addEventListener('scroll', measure, true)
+    window.addEventListener('resize', measure)
+    document.addEventListener('mousedown', handlePointerDown)
+
+    return () => {
+      window.removeEventListener('scroll', measure, true)
+      window.removeEventListener('resize', measure)
+      document.removeEventListener('mousedown', handlePointerDown)
+    }
+  }, [open, measure, close])
+
+  // Keep the highlighted option inside the scrollable list.
+  useEffect(() => {
+    if (!open) return
+    const element = listRef.current?.children[activeIndex]
+    if (element instanceof HTMLElement) element.scrollIntoView({ block: 'nearest' })
+  }, [open, activeIndex])
+
+  const openList = useCallback(() => {
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0)
+    setOpen(true)
+  }, [selectedIndex])
+
+  const commit = (index: number): void => {
+    const option = options[index]
+    if (!option || option.disabled) return
+    onChange(option.value)
+    close()
+  }
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+    switch (event.key) {
+      case 'ArrowDown':
+      case 'ArrowUp': {
+        event.preventDefault()
+        if (!open) {
+          openList()
+          return
+        }
+        const direction = event.key === 'ArrowDown' ? 1 : -1
+        setActiveIndex((index) => stepOption(options, index, direction))
+        return
+      }
+      case 'Home':
+        if (open) {
+          event.preventDefault()
+          setActiveIndex(stepOption(options, -1, 1))
+        }
+        return
+      case 'End':
+        if (open) {
+          event.preventDefault()
+          setActiveIndex(stepOption(options, options.length, -1))
+        }
+        return
+      case 'Enter':
+      case ' ':
+        event.preventDefault()
+        if (open) commit(activeIndex)
+        else openList()
+        return
+      case 'Escape':
+        if (open) {
+          event.preventDefault()
+          event.stopPropagation()
+          close()
+        }
+        return
+      case 'Tab':
+        close()
+        return
+      default:
+    }
+  }
+
   return (
-    <select
-      value={value}
-      disabled={disabled}
-      onChange={(event) => {
-        const raw = event.target.value
-        const match = options.find((option) => String(option.value) === raw)
-        if (match) onChange(match.value)
-      }}
-      className={cn(
-        'h-8 w-full rounded-[9px] border border-border bg-surface px-2 text-sm text-fg',
-        'outline-none transition-colors hover:border-border-strong focus:border-brand',
-        'disabled:cursor-not-allowed disabled:opacity-50',
-        className
-      )}
-    >
-      {options.map((option) => (
-        <option key={String(option.value)} value={String(option.value)} disabled={option.disabled}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        role="combobox"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        disabled={disabled}
+        onClick={() => (open ? close() : openList())}
+        onKeyDown={handleKeyDown}
+        className={cn(
+          'flex h-8 w-full items-center gap-1.5 rounded-[9px] border bg-surface px-2.5 text-left',
+          'text-sm text-fg transition-colors hover:border-border-strong',
+          'disabled:cursor-not-allowed disabled:opacity-50',
+          open ? 'border-brand' : 'border-border',
+          className
+        )}
+      >
+        <span className="min-w-0 flex-1 truncate">{selected?.label ?? ''}</span>
+        <ChevronDown
+          className={cn('size-3.5 shrink-0 text-fg-subtle transition-transform', open && 'rotate-180')}
+        />
+      </button>
+
+      {open && box
+        ? createPortal(
+            <div
+              ref={listRef}
+              role="listbox"
+              style={{
+                position: 'fixed',
+                top: box.top,
+                left: box.left,
+                width: box.width,
+                maxHeight: box.maxHeight
+              }}
+              className={cn(
+                'lm-fade-in z-[60] overflow-y-auto rounded-[10px] border border-border',
+                'bg-surface p-1 shadow-[var(--shadow-pop)]'
+              )}
+            >
+              {options.map((option, index) => {
+                const isSelected = index === selectedIndex
+                const isActive = index === activeIndex
+                return (
+                  <button
+                    key={String(option.value)}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    disabled={option.disabled}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    onClick={() => commit(index)}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-[7px] px-2 py-1.5 text-left text-sm',
+                      'transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                      isActive ? 'bg-brand-soft text-brand' : 'text-fg-muted hover:text-fg'
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                    {isSelected ? <Check className="size-3.5 shrink-0 text-brand" /> : null}
+                  </button>
+                )
+              })}
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   )
 }
 

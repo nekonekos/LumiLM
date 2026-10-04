@@ -1,11 +1,12 @@
 {
   "name": "lumilm",
   "productName": "LumiLM",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "LumiLM - 本地大模型桌面客户端 / Local LLM desktop client powered by llama.cpp",
   "author": {
-    "name": "nekonekos",
+    "name": "LumiNya",
+    "url": "https://luminya.cc",
     "email": "nekonekos@users.noreply.github.com"
   },
   "license": "MIT",
@@ -21,6 +22,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
+    "prebuild": "node scripts/make-icon.mjs",
     "build": "electron-vite build",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit --composite false",
