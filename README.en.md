@@ -279,6 +279,9 @@ Leaving the tool schemas out frees roughly 1400 tokens for the persona and memor
 - Or start from a blank card and write only the persona you want
 - Personas are capped by a token limit (960 by default) and trimmed on line boundaries,
   with a warning when that happens
+- A companion conversation is marked with a heart in the sidebar and its mode is locked
+  once you have talked in it — an empty one can still be switched back, so a stray click
+  is recoverable. Companion is never the inherited default for 新建对话
 
 ### Layered memory
 

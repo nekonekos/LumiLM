@@ -75,6 +75,31 @@ function recallQuery(messages: ChatRequestMessage[]): string {
   return users.map((message) => message.content).join('\n')
 }
 
+/**
+ * Drops the empty assistant bubble the renderer keeps as its streaming target.
+ *
+ * It is a UI placeholder, not history: once the companion prefill adds the
+ * one-space assistant turn that skips the thinking block, a placeholder left in
+ * the list makes llama.cpp reject the whole request with
+ *
+ *   "Cannot have 2 or more assistant messages at the end of the list"
+ *
+ * which surfaced as an unexplained error that reloading the model could not
+ * clear.
+ */
+export function withoutTrailingPlaceholder(
+  messages: ChatRequestMessage[]
+): ChatRequestMessage[] {
+  let end = messages.length
+  while (end > 0) {
+    const last = messages[end - 1]
+    const empty = last.content.trim().length === 0
+    if (last.role !== 'assistant' || !empty || (last.toolCalls?.length ?? 0) > 0) break
+    end -= 1
+  }
+  return end === messages.length ? messages : messages.slice(0, end)
+}
+
 class CompanionService {
   private queue: ExtractionQueue | null = null
   private lastInjection = ''
@@ -179,7 +204,9 @@ class CompanionService {
     // this turn's KV cache.
     const history =
       request.messages.length > 0
-        ? request.messages.map((message) => ({ role: message.role, content: message.content }))
+        ? withoutTrailingPlaceholder(
+            request.messages.map((message) => ({ role: message.role, content: message.content }))
+          )
         : plainMessages(conversation)
     const query = recallQuery(history)
     const hits = settings.memoryEnabled

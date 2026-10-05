@@ -30,6 +30,28 @@ export function Inspector(): ReactNode {
   const mode = useChatStore((state) => state.conversation?.mode ?? 'chat')
   const [tab, setTab] = useState<InspectorTab>('sampling')
 
+  // Skills and MCP only exist behind the agent loop, so showing them for plain
+  // chat or a companion both overflows the strip and invites the user to
+  // configure something that mode will never read.
+  const tabs: Array<{ value: InspectorTab; label: string }> = [
+    { value: 'sampling', label: t('params.sampling') },
+    { value: 'runtime', label: t('params.runtime') },
+    { value: 'system', label: t('params.promptTab') },
+    { value: 'context', label: t('agent.contextTitle') }
+  ]
+  if (mode === 'companion') {
+    tabs.push({ value: 'companion', label: t('companion.tab') })
+    tabs.push({ value: 'memory', label: t('memory.tab') })
+  }
+  if (mode === 'agent') {
+    tabs.push({ value: 'skills', label: t('skills.title') })
+    tabs.push({ value: 'tools', label: t('mcp.tools') })
+  }
+
+  // Switching mode can retire the open tab; without this the panel would keep
+  // rendering a section whose button is gone.
+  const active = tabs.some((entry) => entry.value === tab) ? tab : 'sampling'
+
   return (
     <aside className="flex h-full w-[330px] shrink-0 flex-col border-l border-border bg-surface">
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
@@ -41,35 +63,18 @@ export function Inspector(): ReactNode {
       </header>
 
       <div className="border-b border-border p-3">
-        <Tabs<InspectorTab>
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { value: 'sampling', label: t('params.sampling') },
-            { value: 'runtime', label: t('params.runtime') },
-            { value: 'system', label: t('params.promptTab') },
-            { value: 'context', label: t('agent.contextTitle') },
-            ...(mode === 'companion'
-              ? ([
-                  { value: 'companion' as const, label: t('companion.tab') },
-                  { value: 'memory' as const, label: t('memory.tab') }
-                ])
-              : []),
-            { value: 'skills', label: t('skills.title') },
-            { value: 'tools', label: t('mcp.tools') }
-          ]}
-        />
+        <Tabs<InspectorTab> value={active} onChange={setTab} tabs={tabs} />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
-        {tab === 'sampling' ? <SamplingPanel /> : null}
-        {tab === 'runtime' ? <RuntimePanel /> : null}
-        {tab === 'system' ? <SystemPanel key={conversationId ?? 'none'} /> : null}
-        {tab === 'context' ? <ContextPanel key={conversationId ?? 'none'} /> : null}
-        {tab === 'companion' ? <CompanionPanel key={conversationId ?? 'none'} /> : null}
-        {tab === 'memory' ? <MemoryPanel key={conversationId ?? 'none'} /> : null}
-        {tab === 'skills' ? <SkillsPanel /> : null}
-        {tab === 'tools' ? <ToolsPanel /> : null}
+        {active === 'sampling' ? <SamplingPanel /> : null}
+        {active === 'runtime' ? <RuntimePanel /> : null}
+        {active === 'system' ? <SystemPanel key={conversationId ?? 'none'} /> : null}
+        {active === 'context' ? <ContextPanel key={conversationId ?? 'none'} /> : null}
+        {active === 'companion' ? <CompanionPanel key={conversationId ?? 'none'} /> : null}
+        {active === 'memory' ? <MemoryPanel key={conversationId ?? 'none'} /> : null}
+        {active === 'skills' ? <SkillsPanel /> : null}
+        {active === 'tools' ? <ToolsPanel /> : null}
       </div>
     </aside>
   )

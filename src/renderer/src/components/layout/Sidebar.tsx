@@ -175,6 +175,12 @@ export function Sidebar(): ReactNode {
                     >
                       <span className="flex w-full items-center gap-1.5">
                         {meta.pinned ? <Pin className="size-3 shrink-0 text-brand" /> : null}
+                        {meta.mode === 'companion' ? (
+                          <Heart
+                            className="size-3 shrink-0 text-brand"
+                            aria-label={t('companion.title')}
+                          />
+                        ) : null}
                         <span
                           className={cn(
                             'min-w-0 flex-1 truncate text-[13px] font-medium',

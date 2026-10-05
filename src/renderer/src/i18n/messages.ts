@@ -135,6 +135,8 @@ const zh = {
   'companion.tab': '关系',
   'companion.mode': '伴侣',
   'companion.modeHint': '人格 + 分层记忆，不带工具',
+  'companion.lockNotice': '伴侣模式的对话会记住你们的相处，这个类型选择后不能更改哦。',
+  'companion.lockedHint': '伴侣模式的类型已锁定，无法切换到其他模式',
   'companion.on': '已开启',
   'companion.off': '未开启',
   'companion.start': '开始相处',
@@ -601,6 +603,7 @@ const zh = {
   'toast.modelLoaded': '模型已加载',
   'toast.modelUnloaded': '模型已卸载',
   'toast.noModelSelected': '请先选择一个模型',
+  'toast.alreadyNewChat': '已在新对话中哦~',
 
   'error.NO_MODELS': '还没有添加任何模型。',
   'error.MODEL_MISSING': '模型文件不存在，可能已被移动或删除。',
@@ -751,6 +754,9 @@ const en: Record<MessageKey, string> = {
   'companion.tab': 'Relationship',
   'companion.mode': 'Companion',
   'companion.modeHint': 'Persona and layered memory, no tools',
+  'companion.lockNotice':
+    'A companion conversation remembers how you are together, so its mode cannot be changed later.',
+  'companion.lockedHint': 'A companion conversation is locked to this mode',
   'companion.on': 'On',
   'companion.off': 'Off',
   'companion.start': 'Start talking',
@@ -1231,6 +1237,7 @@ const en: Record<MessageKey, string> = {
   'toast.modelLoaded': 'Model loaded',
   'toast.modelUnloaded': 'Model unloaded',
   'toast.noModelSelected': 'Select a model first',
+  'toast.alreadyNewChat': 'You are already in a new chat',
 
   'error.NO_MODELS': 'No models have been added yet.',
   'error.MODEL_MISSING': 'The model file is gone — it may have been moved or deleted.',

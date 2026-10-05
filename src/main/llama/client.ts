@@ -166,6 +166,35 @@ export function toApiMessages(
   return apiMessages
 }
 
+/**
+ * Turns llama-server's error body into a sentence worth showing to a user.
+ *
+ * The body is JSON (`{"error":{"message":"…"}}`), so surfacing it raw left the
+ * UI showing a wall of escaped JSON that explained nothing.
+ */
+function describeHttpError(status: number, detail: string): string {
+  const trimmed = detail.trim()
+  let message = ''
+
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { error?: string | { message?: string } }
+      message =
+        typeof parsed.error === 'string' ? parsed.error : (parsed.error?.message ?? '')
+    } catch {
+      message = ''
+    }
+  }
+  if (message.length === 0) message = trimmed.slice(0, 300)
+
+  const lines = [`llama-server 返回 HTTP ${status}`]
+  if (message.length > 0) lines.push(message)
+  if (status === 400) lines.push('请求被拒绝：通常是上下文长度或消息顺序的问题，可尝试缩短对话。')
+  else if (status === 404) lines.push('接口不存在：llama.cpp 后端版本可能不匹配。')
+  else if (status >= 500) lines.push('llama-server 内部错误，可查看运行日志。')
+  return lines.join('\n')
+}
+
 export interface StreamOptions {
   /** OpenAI-style function definitions; omitted entirely in plain chat mode. */
   tools?: OpenAiTool[]
@@ -348,7 +377,7 @@ export class LlamaClient {
 
     if (!response.ok || !response.body) {
       const detail = await response.text().catch(() => '')
-      throw new Error(`llama-server returned ${response.status}: ${detail.slice(0, 500)}`)
+      throw new Error(describeHttpError(response.status, detail))
     }
 
     const reader = response.body.getReader()
@@ -451,7 +480,7 @@ export class LlamaClient {
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '')
-      throw new Error(`llama-server returned ${response.status}: ${detail.slice(0, 500)}`)
+      throw new Error(describeHttpError(response.status, detail))
     }
 
     const json = (await response.json()) as CompletionChunk

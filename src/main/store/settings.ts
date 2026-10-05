@@ -190,6 +190,15 @@ export function normalizeSettings(stored: unknown): { settings: AppSettings; mig
     migrated = true
   }
 
+  // Companion is not a mode a new conversation should inherit. It carries a
+  // persona, memories and a lock, and it has its own entry point, so letting it
+  // become the default turned every 新建对话 into a locked companion — which is
+  // exactly what a user who merely previewed the mode ended up with.
+  if (settings.agent.defaultMode === 'companion') {
+    settings.agent.defaultMode = 'chat'
+    migrated = true
+  }
+
   const storedAgent = isPlainObject(raw.agent) ? raw.agent : {}
   const storedCompanion = isPlainObject(raw.companion) ? raw.companion : {}
 

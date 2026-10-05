@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react'
 import { Bot, Heart, MessageSquare } from 'lucide-react'
-import type { AgentPermission } from '@shared/types'
+import type { AgentPermission, ChatMode } from '@shared/types'
 import { Select } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import { useT, type MessageKey } from '@/i18n'
 import { useAgentStore } from '@/stores/agent'
 import { useChatStore } from '@/stores/chat'
+import { useCompanionStore } from '@/stores/companion'
 import { useSettingsStore } from '@/stores/settings'
+import { useUiStore } from '@/stores/ui'
 
 const PERMISSIONS: AgentPermission[] = ['ask-all', 'ask-risky', 'auto']
 
@@ -39,6 +41,27 @@ export function ModeSwitch(): ReactNode {
   const mode = conversation?.mode ?? settingMode ?? 'chat'
   const permission = conversation?.agent.permission ?? settingPermission ?? 'ask-risky'
 
+  // A companion conversation carries a persona, a relationship and memories the
+  // other two modes know nothing about, so once it has been talked to the mode
+  // is permanent. Until then switching away is still allowed, which keeps an
+  // accidental click on 伴侣 recoverable.
+  const locked = conversation?.mode === 'companion' && conversation.messages.length > 0
+
+  const choose = (value: ChatMode): void => {
+    if (locked || value === mode) return
+    if (value === 'companion') {
+      useUiStore.getState().pushToast({ kind: 'info', message: t('companion.lockNotice') })
+      // With nothing open, 伴侣 must not become the *default* the next
+      // conversation inherits — that turned every 新建对话 into a locked
+      // companion. It opens a companion conversation instead.
+      if (!conversation) {
+        void useCompanionStore.getState().openConversation()
+        return
+      }
+    }
+    void setMode(value)
+  }
+
   return (
     <div className="flex items-center gap-2">
       <div
@@ -63,11 +86,13 @@ export function ModeSwitch(): ReactNode {
                 type="button"
                 role="radio"
                 aria-checked={active}
-                title={t(hint)}
-                onClick={() => void setMode(value)}
+                disabled={locked}
+                title={locked ? t('companion.lockedHint') : t(hint)}
+                onClick={() => choose(value)}
                 className={cn(
                   'inline-flex items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11px] transition-colors',
-                  active ? 'bg-brand text-brand-fg' : 'text-fg-muted hover:text-fg'
+                  active ? 'bg-brand text-brand-fg' : 'text-fg-muted hover:text-fg',
+                  locked && !active && 'cursor-not-allowed opacity-50 hover:text-fg-muted'
                 )}
               >
                 <Icon className="size-3" />

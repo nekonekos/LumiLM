@@ -7,6 +7,7 @@ import type {
   PersonaCard,
   RelationshipState
 } from '@shared/types'
+import { translate } from '@/i18n'
 import { useChatStore } from './chat'
 import { useSettingsStore } from './settings'
 import { useUiStore } from './ui'
@@ -148,7 +149,17 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
     const chat = useChatStore.getState()
     const metas = chat.metas
     const existing = metas.find((meta) => meta.mode === 'companion' && !meta.archived)
-    if (existing) await chat.open(existing.id)
-    else await chat.createCompanion()
+    if (existing) {
+      await chat.open(existing.id)
+      return
+    }
+    useUiStore.getState().pushToast({
+      kind: 'info',
+      message: translate(
+        useSettingsStore.getState().settings?.general.locale ?? 'zh-CN',
+        'companion.lockNotice'
+      )
+    })
+    await chat.createCompanion()
   }
 }))

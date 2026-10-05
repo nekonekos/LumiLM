@@ -362,6 +362,16 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     create: async () => {
+      const existing = get().conversation
+      // An empty conversation *is* a new conversation, so creating another one
+      // just stacks identical 「新建对话」 rows in the sidebar.
+      if (existing && existing.messages.length === 0) {
+        useUiStore.getState().pushToast({
+          kind: 'info',
+          message: translate(useSettingsStore.getState().settings?.general.locale ?? 'zh-CN', 'toast.alreadyNewChat')
+        })
+        return existing
+      }
       const model = useModelsStore.getState().activeModel()
       const conversation = await window.lumilm.conversations.create({ modelId: model?.id ?? null })
       set({ conversation, metas: await window.lumilm.conversations.list(), stream: null })
@@ -369,6 +379,14 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     createCompanion: async () => {
+      const existing = get().conversation
+      if (existing && existing.mode === 'companion' && existing.messages.length === 0) {
+        useUiStore.getState().pushToast({
+          kind: 'info',
+          message: translate(useSettingsStore.getState().settings?.general.locale ?? 'zh-CN', 'toast.alreadyNewChat')
+        })
+        return existing
+      }
       const model = useModelsStore.getState().activeModel()
       const conversation = await window.lumilm.conversations.create({
         modelId: model?.id ?? null,

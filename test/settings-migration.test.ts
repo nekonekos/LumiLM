@@ -49,6 +49,18 @@ describe('normalizeSettings', () => {
     expect(migrated).toBe(false)
   })
 
+  it('refuses to let the companion become the default mode for new chats', () => {
+    const { settings, migrated } = normalizeSettings({ agent: { defaultMode: 'companion' } })
+    expect(migrated).toBe(true)
+    expect(settings.agent.defaultMode).toBe('chat')
+  })
+
+  it('keeps the plain chat and agent defaults', () => {
+    expect(normalizeSettings({ agent: { defaultMode: 'agent' } }).settings.agent.defaultMode).toBe(
+      'agent'
+    )
+  })
+
   it('replaces a stored copy of an older default preamble', () => {
     const { settings, migrated } = normalizeSettings({
       agent: { preambleTemplate: SUPERSEDED_AGENT_PREAMBLES[0] }
