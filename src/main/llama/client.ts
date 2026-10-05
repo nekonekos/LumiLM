@@ -63,6 +63,41 @@ interface ToolCallDelta {
   function?: { name?: string; arguments?: string }
 }
 
+interface CompletionChunk {
+  choices?: Array<{
+    message?: {
+      content?: string | null
+      reasoning_content?: string | null
+      reasoning?: string | null
+    }
+    finish_reason?: string | null
+  }>
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+  timings?: ServerTimings
+  error?: { message?: string } | string
+}
+
+function applyUsage(timings: ChatTimings, usage: StreamChunk['usage']): void {
+  if (!usage) return
+  if (typeof usage.prompt_tokens === 'number') timings.promptTokens = usage.prompt_tokens
+  if (typeof usage.completion_tokens === 'number') {
+    timings.completionTokens = usage.completion_tokens
+  }
+}
+
+function applyTimings(timings: ChatTimings, server: ServerTimings | undefined): void {
+  if (!server) return
+  if (typeof server.prompt_n === 'number') timings.promptTokens = server.prompt_n
+  if (typeof server.predicted_n === 'number') timings.completionTokens = server.predicted_n
+  if (typeof server.prompt_per_second === 'number') timings.promptPerSecond = server.prompt_per_second
+  if (typeof server.predicted_per_second === 'number') {
+    timings.tokensPerSecond = server.predicted_per_second
+  }
+  if (typeof server.prompt_ms === 'number' && typeof server.predicted_ms === 'number') {
+    timings.durationMs = server.prompt_ms + server.predicted_ms
+  }
+}
+
 export function buildSamplingPayload(sampling: SamplingParams): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     temperature: sampling.temperature,
@@ -135,6 +170,26 @@ export interface StreamOptions {
   /** OpenAI-style function definitions; omitted entirely in plain chat mode. */
   tools?: OpenAiTool[]
   toolChoice?: string
+  /**
+   * Extra fields merged into the request body verbatim. Used for llama.cpp
+   * knobs the app deliberately does not model, such as `cache_prompt` and
+   * `n_keep`.
+   */
+  extraBody?: Record<string, unknown>
+}
+
+export interface CompleteOptions {
+  /** Extra fields merged into the request body after everything else. */
+  extraBody?: Record<string, unknown>
+  /** Overrides the sampling max_tokens for this single call. */
+  maxTokens?: number
+}
+
+export interface CompletionResult {
+  content: string
+  reasoning: string
+  finishReason: string | null
+  timings: ChatTimings
 }
 
 interface ToolCallAccumulator {
@@ -282,6 +337,7 @@ export class LlamaClient {
       body.tools = options.tools
       body.tool_choice = options.toolChoice ?? 'auto'
     }
+    Object.assign(body, options?.extraBody ?? {})
 
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
@@ -355,25 +411,66 @@ export class LlamaClient {
       if (choice?.finish_reason) callbacks.onFinishReason(choice.finish_reason)
 
       if (chunk.usage) {
-        if (typeof chunk.usage.prompt_tokens === 'number') timings.promptTokens = chunk.usage.prompt_tokens
-        if (typeof chunk.usage.completion_tokens === 'number') {
-          timings.completionTokens = chunk.usage.completion_tokens
-        }
+        applyUsage(timings, chunk.usage)
       }
-      if (chunk.timings) {
-        const server = chunk.timings
-        if (typeof server.prompt_n === 'number') timings.promptTokens = server.prompt_n
-        if (typeof server.predicted_n === 'number') timings.completionTokens = server.predicted_n
-        if (typeof server.prompt_per_second === 'number') {
-          timings.promptPerSecond = server.prompt_per_second
-        }
-        if (typeof server.predicted_per_second === 'number') {
-          timings.tokensPerSecond = server.predicted_per_second
-        }
-        if (typeof server.prompt_ms === 'number' && typeof server.predicted_ms === 'number') {
-          timings.durationMs = server.prompt_ms + server.predicted_ms
-        }
-      }
+      applyTimings(timings, chunk.timings)
+    }
+  }
+
+  /**
+   * One non-streaming completion. Background jobs (memory extraction, dream
+   * consolidation) use this so they can never paint anything into the UI.
+   *
+   * `extraBody` carries the llama.cpp specific knobs. The extractor depends on
+   * two of them: an assistant-message prefill, which skips the model's thinking
+   * block entirely, and `cache_prompt`, which reuses the KV cache of the turn
+   * that just finished.
+   */
+  async complete(
+    request: ChatRequest,
+    options: CompleteOptions = {},
+    signal?: AbortSignal
+  ): Promise<CompletionResult> {
+    const body: Record<string, unknown> = {
+      model: 'lumilm',
+      messages: toApiMessages(request.systemPrompt, request.messages),
+      stream: false,
+      ...buildSamplingPayload(request.sampling)
+    }
+    if (options.maxTokens !== undefined && options.maxTokens > 0) {
+      body.max_tokens = options.maxTokens
+    }
+    Object.assign(body, options.extraBody ?? {})
+
+    const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify(body),
+      signal
+    })
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '')
+      throw new Error(`llama-server returned ${response.status}: ${detail.slice(0, 500)}`)
+    }
+
+    const json = (await response.json()) as CompletionChunk
+    if (json.error) {
+      const message = typeof json.error === 'string' ? json.error : json.error.message
+      throw new Error(message ?? 'unknown llama-server error')
+    }
+
+    const choice = json.choices?.[0]
+    const message = choice?.message ?? {}
+    const timings: ChatTimings = {}
+    applyUsage(timings, json.usage)
+    applyTimings(timings, json.timings)
+
+    return {
+      content: message.content ?? '',
+      reasoning: message.reasoning_content ?? message.reasoning ?? '',
+      finishReason: choice?.finish_reason ?? null,
+      timings
     }
   }
 }

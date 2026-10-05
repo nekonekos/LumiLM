@@ -3,6 +3,23 @@
  * Keep this module free of Node.js and DOM APIs.
  */
 
+import type {
+  CompanionOverview,
+  CompanionSettings,
+  ConversationCompanion,
+  HeartbeatEvent,
+  MemoryEpisode,
+  MemoryFact,
+  MemoryHit,
+  MemoryQuery,
+  MemoryStats,
+  PersonaCard,
+  RelationshipState
+} from './companion'
+
+export * from './companion'
+
+
 /* ------------------------------------------------------------------ */
 /* Basic helpers                                                       */
 /* ------------------------------------------------------------------ */
@@ -247,6 +264,7 @@ export interface AppSettings {
   agent: AgentSettings
   mcp: McpSettings
   skills: SkillsSettings
+  companion: CompanionSettings
   ui: UiSettings
   window: WindowSettings
 }
@@ -360,8 +378,8 @@ export interface ModelSuggestion {
 
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool'
 
-/** A conversation either stays a plain chat or runs the tool-calling agent. */
-export type ChatMode = 'chat' | 'agent'
+/** A conversation stays a plain chat, runs the tool-calling agent, or is the companion. */
+export type ChatMode = 'chat' | 'agent' | 'companion'
 
 /** How much damage a tool call could do. Drives the approval policy. */
 export type ToolRisk = 'read-only' | 'destructive'
@@ -445,6 +463,10 @@ export interface ChatMessage {
   toolCallId?: string
   /** Present on `tool` messages. */
   toolResult?: ToolCallResult
+  /** set on a message the companion started on its own */
+  proactive?: boolean
+  /** a proactive message the user has not read yet */
+  unread?: boolean
 }
 
 export interface SamplingParams {
@@ -490,9 +512,10 @@ export interface Conversation {
   modelId: string | null
   systemPrompt: string
   sampling: SamplingParams
-  /** chat = zero injection; agent = prompt + tools. Older files default to chat. */
+  /** chat = zero injection; agent = prompt + tools; companion = persona + memory. */
   mode: ChatMode
   agent: AgentOverrides
+  companion?: ConversationCompanion
   messages: ChatMessage[]
 }
 
@@ -504,7 +527,10 @@ export interface ConversationMeta {
   pinned: boolean
   archived: boolean
   modelId: string | null
+  mode: ChatMode
   messageCount: number
+  /** proactive messages the user has not seen yet */
+  unreadCount: number
   preview: string
 }
 
@@ -610,6 +636,7 @@ export interface ChatRequest {
   /** defaults to 'chat' so an older renderer or request shape stays inert */
   mode?: ChatMode
   agent?: AgentOverrides
+  companion?: ConversationCompanion
 }
 
 export type ChatStreamEvent =
@@ -766,7 +793,15 @@ export interface SkillInfo {
 /* Prompt preview                                                      */
 /* ------------------------------------------------------------------ */
 
-export type PromptBlockId = 'user' | 'preamble' | 'skills' | 'servers'
+export type PromptBlockId =
+  | 'user'
+  | 'preamble'
+  | 'skills'
+  | 'servers'
+  | 'persona'
+  | 'relationship'
+  | 'memory'
+  | 'summary'
 
 export interface PromptBlockInfo {
   id: PromptBlockId
@@ -784,12 +819,22 @@ export interface PromptPreview {
   totalTokens: number
   /** true when the prompt is deliberately not injected at all */
   injectionDisabled: boolean
+  /**
+   * Companion mode only: the volatile block appended at request time, next to
+   * the newest user message. It is never stored and never shown in the
+   * transcript, so the panel has to render it separately from `text`.
+   */
+  injection?: string
+  injectionTokens?: number
 }
 
 export interface PromptPreviewInput {
   systemPrompt: string
   mode: ChatMode
   agent?: AgentOverrides
+  companion?: ConversationCompanion
+  /** the conversation the preview is for, so session memory can be included */
+  conversationId?: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -825,6 +870,13 @@ export interface AppPaths {
   attachmentsDir: string
   /** default skills root, `<dataDir>/skills` */
   skillsDir: string
+  /** long-term memory store and the companion's diary, `<dataDir>/memory` */
+  memoryDir: string
+  /** persona cards, `<dataDir>/memory/personas` */
+  personasDir: string
+  /** heartbeat bookkeeping, `<dataDir>/memory/heartbeat.json` */
+  heartbeatFile: string
+  memoryFile: string
   presetsFile: string
   settingsFile: string
   /** mcp.json, kept outside settings so it can be edited externally */
@@ -894,6 +946,44 @@ export interface LumiLMApi {
     approveToolCall(streamId: string, callId: string, decision: ApprovalDecision): Promise<void>
     previewPrompt(input: PromptPreviewInput): Promise<PromptPreview>
   }
+  companion: {
+    /** relationship, resolved card, heartbeat bookkeeping and memory counters */
+    overview(): Promise<CompanionOverview>
+    send(request: ChatRequest): Promise<void>
+    abort(streamId: string): Promise<void>
+    previewPrompt(input: PromptPreviewInput): Promise<PromptPreview>
+    updateRelationship(patch: Partial<RelationshipState>): Promise<CompanionOverview>
+    setHeartbeat(patch: { enabled?: boolean; snoozeMinutes?: number }): Promise<CompanionOverview>
+    /** fires one heartbeat immediately, ignoring the idle and probability gates */
+    heartbeatTest(): Promise<boolean>
+    dreamNow(): Promise<CompanionOverview>
+  }
+  memory: {
+    list(query?: MemoryQuery): Promise<MemoryFact[]>
+    stats(): Promise<MemoryStats>
+    /** dry-run of the recall that the next turn will inject */
+    recall(query: string, limit?: number): Promise<MemoryHit[]>
+    update(id: string, patch: Partial<MemoryFact>): Promise<MemoryFact[]>
+    remove(id: string): Promise<MemoryFact[]>
+    removeMany(ids: string[]): Promise<MemoryFact[]>
+    /** accept or reject facts sitting in the review queue */
+    approve(ids: string[], accept: boolean): Promise<MemoryFact[]>
+    episodes(): Promise<MemoryEpisode[]>
+    forgetAll(): Promise<void>
+    exportToFile(): Promise<string | null>
+    importFromFile(): Promise<MemoryFact[] | null>
+  }
+  personas: {
+    list(): Promise<PersonaCard[]>
+    save(card: PersonaCard): Promise<PersonaCard[]>
+    remove(id: string): Promise<PersonaCard[]>
+    /** import a SillyTavern V2 or LumiLM card from a file */
+    importFromFile(): Promise<PersonaCard | null>
+    exportToFile(id: string): Promise<string | null>
+    detectImage(id: string): Promise<string | null>
+    /** re-creates the card LumiLM ships with after it was edited or deleted */
+    restoreBuiltin(): Promise<PersonaCard[]>
+  }
   mcp: {
     list(): Promise<McpServerState[]>
     /** the raw configuration exactly as stored in mcp.json */
@@ -923,7 +1013,7 @@ export interface LumiLMApi {
   conversations: {
     list(): Promise<ConversationMeta[]>
     get(id: string): Promise<Conversation | null>
-    create(init?: { modelId?: string | null; title?: string }): Promise<Conversation>
+    create(init?: { modelId?: string | null; title?: string; mode?: ChatMode }): Promise<Conversation>
     save(conversation: Conversation): Promise<void>
     remove(id: string): Promise<void>
     duplicate(id: string): Promise<Conversation | null>
@@ -952,8 +1042,13 @@ export interface LumiLMApi {
     onServerLog(cb: (line: string) => void): Unsubscribe
     onChatStream(cb: (event: ChatStreamEvent) => void): Unsubscribe
     onAgentStream(cb: (event: ChatStreamEvent) => void): Unsubscribe
+    onCompanionStream(cb: (event: ChatStreamEvent) => void): Unsubscribe
     onSettingsChanged(cb: (settings: AppSettings) => void): Unsubscribe
     onMcpStatus(cb: (servers: McpServerState[]) => void): Unsubscribe
+    /** a proactive message appeared, either in the open window or in the background */
+    onHeartbeat(cb: (event: HeartbeatEvent) => void): Unsubscribe
+    /** the memory store changed; payload is the refreshed overview */
+    onMemoryChanged(cb: (overview: CompanionOverview) => void): Unsubscribe
     onToast(cb: (toast: ToastPayload) => void): Unsubscribe
   }
 }

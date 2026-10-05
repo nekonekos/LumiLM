@@ -12,6 +12,7 @@ export type SettingsTabKey =
   | 'inference'
   | 'models'
   | 'agent'
+  | 'companion'
   | 'mcp'
   | 'skills'
   | 'advanced'
@@ -23,6 +24,7 @@ interface UiState {
   settingsOpen: boolean
   settingsTab: SettingsTabKey
   logsOpen: boolean
+  memoryOpen: boolean
   commandOpen: boolean
   toasts: Toast[]
   /** ring buffer of llama-server log lines received while the app is running */
@@ -35,6 +37,7 @@ interface UiState {
   openSettings: (tab?: SettingsTabKey) => void
   closeSettings: () => void
   setLogsOpen: (open: boolean) => void
+  setMemoryOpen: (open: boolean) => void
   setCommandOpen: (open: boolean) => void
   appendLog: (line: string) => void
   setLogs: (lines: string[]) => void
@@ -52,6 +55,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   settingsOpen: false,
   settingsTab: 'general',
   logsOpen: false,
+  memoryOpen: false,
   commandOpen: false,
   toasts: [],
   logs: [],
@@ -66,6 +70,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   closeSettings: () => set({ settingsOpen: false }),
 
   setLogsOpen: (logsOpen) => set({ logsOpen }),
+  setMemoryOpen: (memoryOpen) => set({ memoryOpen }),
   setCommandOpen: (commandOpen) => set({ commandOpen }),
 
   appendLog: (line) =>

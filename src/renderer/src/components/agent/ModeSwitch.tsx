@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Bot, MessageSquare } from 'lucide-react'
+import { Bot, Heart, MessageSquare } from 'lucide-react'
 import type { AgentPermission } from '@shared/types'
 import { Select } from '@/components/ui'
 import { cn } from '@/lib/cn'
@@ -46,28 +46,36 @@ export function ModeSwitch(): ReactNode {
         role="radiogroup"
         aria-label={t('agent.mode')}
       >
-        {(['chat', 'agent'] as const).map((value) => {
+        {(['chat', 'agent', 'companion'] as const).map((value) => {
           const active = mode === value
-          const Icon = value === 'chat' ? MessageSquare : Bot
-          return (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              title={t(value === 'chat' ? 'agent.modeChatHint' : 'agent.modeAgentHint')}
-              onClick={() => void setMode(value)}
-              className={cn(
-                'inline-flex items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11px] transition-colors',
-                active ? 'bg-brand text-brand-fg' : 'text-fg-muted hover:text-fg'
-              )}
-            >
-              <Icon className="size-3" />
-              {t(value === 'chat' ? 'agent.modeChat' : 'agent.modeAgent')}
-            </button>
-          )
-        })}
-      </div>
+            const Icon = value === 'chat' ? MessageSquare : value === 'agent' ? Bot : Heart
+            const label =
+              value === 'chat' ? 'agent.modeChat' : value === 'agent' ? 'agent.modeAgent' : 'companion.mode'
+            const hint =
+              value === 'chat'
+                ? 'agent.modeChatHint'
+                : value === 'agent'
+                  ? 'agent.modeAgentHint'
+                  : 'companion.modeHint'
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                title={t(hint)}
+                onClick={() => void setMode(value)}
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11px] transition-colors',
+                  active ? 'bg-brand text-brand-fg' : 'text-fg-muted hover:text-fg'
+                )}
+              >
+                <Icon className="size-3" />
+                {t(label)}
+              </button>
+            )
+          })}
+        </div>
 
       {mode === 'agent' ? (
         <span title={t(PERMISSION_HINTS[permission])} className="inline-flex">

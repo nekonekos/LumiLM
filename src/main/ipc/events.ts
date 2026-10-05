@@ -2,6 +2,8 @@ import type { WebContents } from 'electron'
 import { CH } from '@shared/channels'
 import type {
   ChatStreamEvent,
+  CompanionOverview,
+  HeartbeatEvent,
   McpServerState,
   ServerState,
   AppSettings,
@@ -33,6 +35,18 @@ export function emitChatStream(event: ChatStreamEvent): void {
 
 export function emitAgentStream(event: ChatStreamEvent): void {
   send(CH.events.agentStream, event)
+}
+
+export function emitCompanionStream(event: ChatStreamEvent): void {
+  send(CH.events.companionStream, event)
+}
+
+export function emitHeartbeat(event: HeartbeatEvent): void {
+  send(CH.events.heartbeat, event)
+}
+
+export function emitMemoryChanged(overview: CompanionOverview): void {
+  send(CH.events.memoryChanged, overview)
 }
 
 export function emitSettingsChanged(settings: AppSettings): void {

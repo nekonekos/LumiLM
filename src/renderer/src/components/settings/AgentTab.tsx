@@ -8,7 +8,8 @@ import { useUiStore } from '@/stores/ui'
 
 const MODE_LABELS: Record<ChatMode, MessageKey> = {
   chat: 'agent.modeChat',
-  agent: 'agent.modeAgent'
+  agent: 'agent.modeAgent',
+  companion: 'companion.mode'
 }
 
 const PERMISSION_LABELS: Record<AgentPermission, MessageKey> = {
@@ -51,7 +52,7 @@ export function AgentTab(): ReactNode {
           <Select<ChatMode>
             value={agent.defaultMode}
             onChange={(value) => void update({ agent: { defaultMode: value } })}
-            options={(['chat', 'agent'] as const).map((value) => ({
+            options={(['chat', 'agent', 'companion'] as const).map((value) => ({
               value,
               label: t(MODE_LABELS[value])
             }))}

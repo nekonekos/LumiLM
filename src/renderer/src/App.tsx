@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChatView } from '@/components/chat/ChatView'
 import { AgentView } from '@/components/agent/AgentView'
+import { CompanionView } from '@/components/companion/CompanionView'
 import { Inspector } from '@/components/inspector/Inspector'
 import { LogViewer } from '@/components/logs/LogViewer'
+import { MemoryLibrary } from '@/components/memory/MemoryLibrary'
 import { Onboarding } from '@/components/onboarding/Onboarding'
 import { SettingsDialog } from '@/components/settings/SettingsDialog'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -45,7 +47,9 @@ export function App(): ReactNode {
   const defaultMode = useSettingsStore((state) => state.settings?.agent.defaultMode ?? 'chat')
 
   const conversationMode = useChatStore((state) => state.conversation?.mode ?? null)
-  const isAgent = (conversationMode ?? defaultMode) === 'agent'
+  const mode = conversationMode ?? defaultMode
+  const isAgent = mode === 'agent'
+  const isCompanion = mode === 'companion'
 
   const models = useModelsStore((state) => state.models)
   const modelCount = models.length
@@ -131,7 +135,7 @@ export function App(): ReactNode {
         )}
 
         <main className="flex min-w-0 flex-1 flex-col">
-          {isAgent ? <AgentView /> : <ChatView />}
+          {isCompanion ? <CompanionView /> : isAgent ? <AgentView /> : <ChatView />}
         </main>
 
         {inspectorCollapsed ? null : <Inspector />}
@@ -142,6 +146,7 @@ export function App(): ReactNode {
       <ToastHost />
       <SettingsDialog />
       <LogViewer />
+      <MemoryLibrary />
       {showOnboarding ? <Onboarding onDone={dismissOnboarding} /> : null}
     </div>
   )

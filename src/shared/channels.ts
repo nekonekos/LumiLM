@@ -45,6 +45,38 @@ export const CH = {
     approveTool: 'agent:approve-tool',
     previewPrompt: 'agent:preview-prompt'
   },
+  companion: {
+    overview: 'companion:overview',
+    send: 'companion:send',
+    abort: 'companion:abort',
+    previewPrompt: 'companion:preview-prompt',
+    updateRelationship: 'companion:update-relationship',
+    setHeartbeat: 'companion:set-heartbeat',
+    heartbeatTest: 'companion:heartbeat-test',
+    dreamNow: 'companion:dream-now'
+  },
+  memory: {
+    list: 'memory:list',
+    stats: 'memory:stats',
+    recall: 'memory:recall',
+    update: 'memory:update',
+    remove: 'memory:remove',
+    removeMany: 'memory:remove-many',
+    approve: 'memory:approve',
+    episodes: 'memory:episodes',
+    forgetAll: 'memory:forget-all',
+    export: 'memory:export',
+    import: 'memory:import'
+  },
+  personas: {
+    list: 'personas:list',
+    save: 'personas:save',
+    remove: 'personas:remove',
+    import: 'personas:import',
+    export: 'personas:export',
+    detectImage: 'personas:detect-image',
+    restoreBuiltin: 'personas:restore-builtin'
+  },
   mcp: {
     list: 'mcp:list',
     configs: 'mcp:configs',
@@ -101,8 +133,11 @@ export const CH = {
     serverLog: 'event:server-log',
     chatStream: 'event:chat-stream',
     agentStream: 'event:agent-stream',
+    companionStream: 'event:companion-stream',
     settingsChanged: 'event:settings-changed',
     mcpStatus: 'event:mcp-status',
+    heartbeat: 'event:heartbeat',
+    memoryChanged: 'event:memory-changed',
     toast: 'event:toast'
   }
 } as const

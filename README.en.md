@@ -23,6 +23,8 @@ Electron + React + llama.cpp, tuned for GPUs with ~8 GB of VRAM.
 | **Multimodal** | Understands `mmproj` vision projectors, so pasted or dropped images can be used as prompts |
 | **No preset prompts** | No built-in personas or prompt templates. System prompts, sampling parameters and presets are entirely yours |
 | **Optional agent** | Plain chat by default; switch to Agent mode to reach MCP tools and skills that act on files, shells and other environments |
+| **Digital companion** | A third mode: layered memory and proactive wake-ups, with character cards imported from SillyTavern V2 or written from scratch |
+| **Transparent memory** | The memory library shows every fact the companion holds, ready to edit, pin or delete; nothing reaches the prompt before you accept it |
 | **Transparent prompting** | Every injected prompt block can be inspected, edited or switched off, with its token cost shown |
 | **Highly configurable** | Every conversation stores its own sampling parameters and system prompt, and can be saved as a reusable preset |
 | **Polished UI** | Light-blue theme with a dark mode, system-preference following, custom accent colour and font size |
@@ -255,6 +257,91 @@ Tool output is what blows up a context window, so on low-end machines LumiLM:
 - then drops the oldest tool-calling rounds in pairs, never leaving an orphaned result,
 - and reports how many tokens the tool definitions themselves cost so you can prune them.
 
+## Digital companion
+
+A third mode beside plain chat and Agent. It carries no tools at all — only a persona and
+its memory — and is meant to be a local companion that remembers you over time.
+
+### How the three modes differ
+
+| Mode | Prompt injection | Tools | Memory |
+|---|---|---|---|
+| Plain chat | none | none | none |
+| Companion | persona + relationship + memories | none | L1 / L2 / L3 |
+| Agent | customisable template | MCP / skills | none |
+
+Leaving the tool schemas out frees roughly 1400 tokens for the persona and memory.
+
+### Character cards
+
+- A built-in sample card, "Lumi", whose default relationship is a close companion
+- Import and export **SillyTavern V2** cards (`.json` / `.png`)
+- Or start from a blank card and write only the persona you want
+- Personas are capped by a token limit (960 by default) and trimmed on line boundaries,
+  with a warning when that happens
+
+### Layered memory
+
+| Layer | Content | Stored in |
+|---|---|---|
+| L1 working | the relationship and facts injected this turn | the request only — never written, never shown in the transcript |
+| L2 session | rolling summary and turn count | per conversation, for continuity |
+| L3 long-term | structured facts and an event timeline | `memory.json` (atomic writes), exportable and importable |
+
+Recall scores by `0.6 × lexical + 0.2 × recency + 0.2 × importance`. Chinese is indexed
+with bigrams, so short phrases still hit. Pinned and boundary facts are **guaranteed a
+slot** and cannot be budgeted out; a fact that comes up again is merged and its
+reinforcement count incremented rather than duplicated.
+
+**KV-cache friendly.** The persona is a stable prefix (byte-identical turn to turn, so it
+stays cacheable) while the relationship and memories are appended to the newest user
+message as an injection block that exists only for the duration of the request.
+
+### Background memory extraction
+
+600 ms after a reply, an extraction pass runs in the background reusing the **KV cache of
+the turn that just finished** — about 2.7 s in practice.
+
+It reads only the user's own words. It does **not** read:
+
+- the assistant's replies, which it would otherwise re-learn as facts about you,
+- the injected memory block, which it would otherwise index as new facts
+  ("affinity 60/100" and so on, accumulating every turn),
+- hedged statements — "some kind of", "probably", "inferred from", "not stated" are all dropped.
+
+Results land in a pending queue and take part in nothing until you accept them.
+
+### Proactive wake-ups
+
+A main-process timer combines system idle detection (`powerMonitor`) with a probability:
+
+- consecutive wake-ups back off exponentially (`0.5^streak`, floor 1/16), with a randomised
+  5–20 minute cooldown so it never becomes a nuisance,
+- quiet hours (including across midnight) and a manual snooze are supported,
+- it raises a system notification that focuses the window when clicked, and proactive
+  messages are marked as such in the transcript,
+- above the composer you can trigger one right now, or ask it to "dream" (reflect).
+
+### Thinking intensity
+
+Companion mode **skips the thinking block by default**: measured time-to-first-token drops
+from 13167 ms to 1741 ms, a greeting takes 638 ms, and the output stays better in
+character. It can be turned on when you want the reasoning.
+
+The skip works by prefilling one space into the assistant turn so the model continues from
+there. It is a per-request parameter and needs **no model reload** — unlike the Agent
+mode's `--reasoning-budget`, which only takes effect at start-up.
+
+### Memory library (data sovereignty)
+
+The memory library in the sidebar lets you:
+
+- browse every fact like a diary, filter by kind / subject / status, and search,
+- edit, pin, hide, archive or delete individual facts, or forget everything at once,
+- accept or reject the pending queue in bulk,
+- see and hand-edit affinity, nickname, stage and mood in the relationship panel,
+- read the event timeline and session summaries.
+
 ## Design notes
 
 - **Child process, not bindings.** LumiLM talks to a `llama-server` child process over a
@@ -280,6 +367,9 @@ Tool output is what blows up a context window, so on low-end machines LumiLM:
 | Attachments | `%APPDATA%\LumiLM\attachments\` |
 | Skills (default folder) | `%APPDATA%\LumiLM\skills\` |
 | MCP configuration | `%APPDATA%\LumiLM\mcp.json` |
+| Memory library | `%APPDATA%\LumiLM\memory\memory.json` |
+| Companion state (heartbeat, relationship) | `%APPDATA%\LumiLM\memory\heartbeat.json` |
+| Character cards | `%APPDATA%\LumiLM\personas\*.json` |
 | Logs | `%APPDATA%\LumiLM\logs\lumilm.log` |
 
 A custom data directory can be chosen under *Settings → General*.

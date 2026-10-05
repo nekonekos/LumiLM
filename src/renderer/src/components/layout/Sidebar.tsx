@@ -1,8 +1,10 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
+  Brain,
   Download,
   FileJson,
   Copy,
+  Heart,
   MessageSquarePlus,
   MoreHorizontal,
   Pin,
@@ -13,11 +15,13 @@ import {
   Upload,
   Pencil
 } from 'lucide-react'
-import { Button, Dialog, IconButton, TextInput } from '@/components/ui'
+import { Badge, Button, Dialog, IconButton, TextInput } from '@/components/ui'
 import { useT, useLocale } from '@/i18n'
 import { cn } from '@/lib/cn'
 import { formatRelativeTime } from '@/lib/format'
 import { useChatStore } from '@/stores/chat'
+import { useCompanionStore } from '@/stores/companion'
+import { useMemoryStore } from '@/stores/memory'
 import { useSettingsStore } from '@/stores/settings'
 import { useUiStore } from '@/stores/ui'
 
@@ -36,6 +40,15 @@ export function Sidebar(): ReactNode {
   const importConversation = useChatStore((state) => state.importConversation)
   const confirmOnDelete = useSettingsStore((state) => state.settings?.general.confirmOnDelete ?? true)
   const openSettings = useUiStore((state) => state.openSettings)
+  const setMemoryOpen = useUiStore((state) => state.setMemoryOpen)
+  const openConversation = useCompanionStore((state) => state.openConversation)
+  const memoryStats = useMemoryStore((state) => state.stats)
+  const loadMemory = useMemoryStore((state) => state.load)
+  const pendingCount = memoryStats?.pending ?? 0
+
+  useEffect(() => {
+    void loadMemory()
+  }, [loadMemory])
 
   const [query, setQuery] = useState('')
   const [menuId, setMenuId] = useState<string | null>(null)
@@ -93,6 +106,32 @@ export function Sidebar(): ReactNode {
             aria-label={t('nav.searchPlaceholder')}
           />
         </div>
+
+        <div className="flex gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex-1 justify-center"
+            onClick={() => void openConversation()}
+          >
+            <Heart className="size-3.5" />
+            {t('companion.title')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex-1 justify-center"
+            onClick={() => setMemoryOpen(true)}
+          >
+            <Brain className="size-3.5" />
+            {t('memory.title')}
+            {pendingCount > 0 ? (
+              <Badge tone="brand" className="px-1 py-0">
+                {pendingCount}
+              </Badge>
+            ) : null}
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -147,9 +186,14 @@ export function Sidebar(): ReactNode {
                         <span className="shrink-0 text-[10px] text-fg-subtle">
                           {formatRelativeTime(meta.updatedAt, locale)}
                         </span>
-                      </span>
-                      {meta.preview ? (
+                      </span>                      {meta.preview ? (
                         <span className="w-full truncate text-[11px] text-fg-subtle">{meta.preview}</span>
+                      ) : null}
+                      {meta.mode === 'companion' && meta.unreadCount > 0 ? (
+                        <Badge tone="brand" className="mt-0.5 px-1.5 py-0">
+                          <Heart className="size-2.5" />
+                          {meta.unreadCount}
+                        </Badge>
                       ) : null}
                     </button>
                   )}

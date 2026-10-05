@@ -46,6 +46,8 @@ interface ChatState {
   setServerState: (state: ServerState) => void
   open: (id: string) => Promise<void>
   create: () => Promise<Conversation>
+  /** Opens a conversation already switched to companion mode. */
+  createCompanion: () => Promise<Conversation>
   remove: (id: string) => Promise<void>
   duplicate: (id: string) => Promise<void>
   rename: (id: string, title: string) => Promise<void>
@@ -301,11 +303,17 @@ export const useChatStore = create<ChatState>((set, get) => {
       systemPrompt: conversation.systemPrompt,
       messages,
       sampling: conversation.sampling,
-      mode: 'chat'
+      mode: conversation.mode,
+      ...(conversation.mode === 'companion' ? { companion: conversation.companion } : {})
     }
 
     try {
-      await window.lumilm.chat.send(request)
+      // Each mode owns its channel: only the code that composed a companion
+      // prompt can inject the persona and memory block, and only the agent
+      // channel can honour tool approvals.
+      if (conversation.mode === 'companion') await window.lumilm.companion.send(request)
+      else if (conversation.mode === 'agent') await window.lumilm.agent.send(request)
+      else await window.lumilm.chat.send(request)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       void finalize(undefined, false, translateErrorCode(locale, message))
@@ -335,6 +343,18 @@ export const useChatStore = create<ChatState>((set, get) => {
       set({ loading: true })
       try {
         const conversation = await window.lumilm.conversations.get(id)
+        // Opening a conversation is what "reading" a proactive message means.
+        if (conversation?.messages.some((message) => message.unread)) {
+          const read: Conversation = {
+            ...conversation,
+            messages: conversation.messages.map((message) =>
+              message.unread ? { ...message, unread: false } : message
+            )
+          }
+          await window.lumilm.conversations.save(read)
+          set({ conversation: read, stream: null, lastTrimmed: 0, metas: await window.lumilm.conversations.list() })
+          return
+        }
         set({ conversation, stream: null, lastTrimmed: 0 })
       } finally {
         set({ loading: false })
@@ -344,6 +364,16 @@ export const useChatStore = create<ChatState>((set, get) => {
     create: async () => {
       const model = useModelsStore.getState().activeModel()
       const conversation = await window.lumilm.conversations.create({ modelId: model?.id ?? null })
+      set({ conversation, metas: await window.lumilm.conversations.list(), stream: null })
+      return conversation
+    },
+
+    createCompanion: async () => {
+      const model = useModelsStore.getState().activeModel()
+      const conversation = await window.lumilm.conversations.create({
+        modelId: model?.id ?? null,
+        mode: 'companion'
+      })
       set({ conversation, metas: await window.lumilm.conversations.list(), stream: null })
       return conversation
     },
@@ -528,6 +558,13 @@ export const useChatStore = create<ChatState>((set, get) => {
           if (event.content) pendingContent += event.content
           if (event.reasoning) pendingReasoning += event.reasoning
           if (pendingContent || pendingReasoning) scheduleFlush()
+          break
+
+        case 'content-reset':
+          // The companion regenerated a reply that broke character; everything
+          // streamed so far was replaced on the main side.
+          resetPending()
+          set({ stream: { ...stream, content: event.content, reasoning: '' } })
           break
 
         case 'metrics':

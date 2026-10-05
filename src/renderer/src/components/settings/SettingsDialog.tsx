@@ -15,6 +15,7 @@ import { formatNumber } from '@/lib/format'
 import { ModelManager } from '@/components/models/ModelManager'
 import { RuntimePanel } from '@/components/inspector/RuntimePanel'
 import { AgentTab } from '@/components/settings/AgentTab'
+import { CompanionTab } from '@/components/settings/CompanionTab'
 import { McpTab } from '@/components/settings/McpTab'
 import { SkillsTab } from '@/components/settings/SkillsTab'
 import { useAppIcon } from '@/hooks/useAppIcon'
@@ -81,6 +82,7 @@ export function SettingsDialog(): ReactNode {
               { value: 'inference', label: t('settings.inference') },
               { value: 'models', label: t('settings.models') },
               { value: 'agent', label: t('settings.agent') },
+              { value: 'companion', label: t('companion.settingsTab') },
               { value: 'mcp', label: t('settings.mcp') },
               { value: 'skills', label: t('settings.skills') },
               { value: 'advanced', label: t('settings.advanced') },
@@ -247,6 +249,7 @@ export function SettingsDialog(): ReactNode {
           {tab === 'inference' ? <RuntimePanel /> : null}
           {tab === 'models' ? <ModelManager /> : null}
           {tab === 'agent' ? <AgentTab /> : null}
+          {tab === 'companion' ? <CompanionTab /> : null}
           {tab === 'mcp' ? <McpTab /> : null}
           {tab === 'skills' ? <SkillsTab /> : null}
 

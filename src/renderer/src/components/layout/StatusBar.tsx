@@ -1,9 +1,54 @@
 import type { ReactNode } from 'react'
-import { Cpu, HardDrive, MemoryStick, Timer, Zap } from 'lucide-react'
+import { Cpu, HardDrive, Heart, MemoryStick, Timer, Zap } from 'lucide-react'
 import { useT } from '@/i18n'
 import { formatBytes, formatDuration, formatGigabytes, formatSpeed } from '@/lib/format'
 import { useChatStore } from '@/stores/chat'
+import { useCompanionStore } from '@/stores/companion'
 import { useModelsStore } from '@/stores/models'
+import { useUiStore } from '@/stores/ui'
+
+/** Heartbeat state and a one-click mute, so the companion is never a mystery. */
+function HeartbeatStatus(): ReactNode {
+  const t = useT()
+  const status = useCompanionStore((state) => state.status)
+  const snooze = useCompanionStore((state) => state.snooze)
+  const setMemoryOpen = useUiStore((state) => state.setMemoryOpen)
+
+  if (!status?.enabled) return null
+
+  return (
+    <span className="flex items-center gap-2 whitespace-nowrap">
+      <button
+        type="button"
+        onClick={() => setMemoryOpen(true)}
+        title={t('memory.openLibrary')}
+        className="flex items-center gap-1.5 text-fg-muted transition-colors hover:text-fg"
+      >
+        <Heart className="size-3 text-brand" />
+        <span className="tabular-nums">{status.factCount}</span>
+      </button>
+      {status.snoozed ? (
+        <button
+          type="button"
+          onClick={() => void snooze(0)}
+          className="text-warning transition-colors hover:text-fg"
+          title={t('companion.snooze')}
+        >
+          {t('companion.snooze')}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void snooze(60)}
+          className="text-fg-subtle transition-colors hover:text-fg"
+          title={t('companion.snoozeHour')}
+        >
+          {t('companion.heartbeat')}
+        </button>
+      )}
+    </span>
+  )
+}
 
 function Metric({
   icon,
@@ -70,6 +115,8 @@ export function StatusBar(): ReactNode {
       ) : null}
 
       <span className="flex-1" />
+
+      <HeartbeatStatus />
 
       {gpu ? (
         <Metric

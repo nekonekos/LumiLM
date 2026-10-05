@@ -1,12 +1,24 @@
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
-import type { AgentSettings, AppSettings, DeepPartial } from '@shared/types'
-import { DEFAULT_AGENT_PREAMBLE, SUPERSEDED_AGENT_PREAMBLES } from '@shared/types'
+import type { AgentSettings, AppSettings, CompanionSettings, DeepPartial } from '@shared/types'
+import {
+  DEFAULT_AGENT_PREAMBLE,
+  DEFAULT_COMPANION_SAMPLING,
+  DEFAULT_MEMORY_TEMPLATE,
+  DEFAULT_PERSONA_TEMPLATE,
+  DEFAULT_RECALL_COUNT,
+  DEFAULT_RECALL_TOKEN_BUDGET,
+  DEFAULT_SUMMARY_TOKEN_BUDGET,
+  DEFAULT_PERSONA_TOKEN_LIMIT,
+  SUPERSEDED_AGENT_PREAMBLES,
+  SUPERSEDED_MEMORY_TEMPLATES,
+  SUPERSEDED_PERSONA_TEMPLATES
+} from '@shared/types'
 import { readJsonSync, writeJsonAtomicSync } from '../util/atomic-json'
 import { logger, toError } from '../util/logger'
 import { ensureDataDirs, getPaths, setDataDirOverride } from './paths'
 
-const SETTINGS_VERSION = 2
+const SETTINGS_VERSION = 3
 
 export const DEFAULT_SETTINGS: AppSettings = {
   version: SETTINGS_VERSION,
@@ -72,6 +84,36 @@ export const DEFAULT_SETTINGS: AppSettings = {
     directories: [],
     defaultEnabledIds: []
   },
+  companion: {
+    enabled: false,
+    characterCardId: 'builtin-lumi',
+    personaTemplate: DEFAULT_PERSONA_TEMPLATE,
+    memoryTemplate: DEFAULT_MEMORY_TEMPLATE,
+    memoryInjectionMode: 'user-suffix',
+    memoryEnabled: true,
+    autoExtract: true,
+    autoAcceptFacts: false,
+    extractDelayMs: 600,
+    recallCount: DEFAULT_RECALL_COUNT,
+    recallTokenBudget: DEFAULT_RECALL_TOKEN_BUDGET,
+    summaryTokenBudget: DEFAULT_SUMMARY_TOKEN_BUDGET,
+    personaTokenLimit: DEFAULT_PERSONA_TOKEN_LIMIT,
+    includeEpisodes: true,
+    antiOocRetry: true,
+    skipThinking: true,
+    heartbeatEnabled: false,
+    heartbeatIdleMinutes: 15,
+    heartbeatProbability: 0.3,
+    heartbeatMinGapMinutes: 90,
+    heartbeatMaxPerDay: 3,
+    quietHours: [23, 8],
+    snoozeMinutes: 60,
+    focusOnNotification: true,
+    allowColdStart: false,
+    dreamingEnabled: true,
+    dreamIdleMinutes: 10,
+    sampling: { ...DEFAULT_COMPANION_SAMPLING }
+  } satisfies CompanionSettings,
   ui: {
     sidebarWidth: 268,
     sidebarCollapsed: false,
@@ -109,11 +151,35 @@ function sameTemplate(a: string, b: string): boolean {
   return a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n')
 }
 
+/**
+ * A stored template is a verbatim copy of whatever default shipped when the
+ * settings file was first written, so editing the default in source has no
+ * effect on an existing install. Returns the replacement when the stored text
+ * is a superseded default, and null when it is anything else — a template the
+ * user edited never matches and is therefore left alone.
+ */
+function migratedTemplate(
+  stored: unknown,
+  superseded: readonly string[],
+  current: string
+): string | null {
+  if (typeof stored !== 'string') return null
+  return superseded.some((template) => sameTemplate(template, stored)) ? current : null
+}
+
 /** Fills in any missing key so an older settings file keeps working after an update. */
 export function normalizeSettings(stored: unknown): { settings: AppSettings; migrated: boolean } {
   const raw = isPlainObject(stored) ? stored : {}
   const settings = deepMerge(DEFAULT_SETTINGS, stored)
   let migrated = false
+
+  // `deepMerge` lets a stored value win, which would pin the file to whatever
+  // version first wrote it. The field is the only record of which shape the
+  // file was written in, so it is forced rather than merged.
+  if (settings.version !== SETTINGS_VERSION) {
+    settings.version = SETTINGS_VERSION
+    migrated = true
+  }
 
   const legacy = settings.agent as AgentSettings & { workspaceToolsEnabled?: boolean }
   // 0.2.0 exposed a single `workspaceToolsEnabled` switch; it now covers only
@@ -124,16 +190,40 @@ export function normalizeSettings(stored: unknown): { settings: AppSettings; mig
     migrated = true
   }
 
-  // The preamble is a copy of whatever default shipped when the file was first
-  // written, so changing the default alone would never reach an existing
-  // install. A preamble the user edited never matches and is left alone.
   const storedAgent = isPlainObject(raw.agent) ? raw.agent : {}
-  const storedPreamble = storedAgent.preambleTemplate
-  if (
-    typeof storedPreamble === 'string' &&
-    SUPERSEDED_AGENT_PREAMBLES.some((template) => sameTemplate(template, storedPreamble))
-  ) {
-    settings.agent.preambleTemplate = DEFAULT_AGENT_PREAMBLE
+  const storedCompanion = isPlainObject(raw.companion) ? raw.companion : {}
+
+  const templates: Array<{ stored: unknown; superseded: readonly string[]; current: string; apply: (text: string) => void }> = [
+    {
+      stored: storedAgent.preambleTemplate,
+      superseded: SUPERSEDED_AGENT_PREAMBLES,
+      current: DEFAULT_AGENT_PREAMBLE,
+      apply: (text) => {
+        settings.agent.preambleTemplate = text
+      }
+    },
+    {
+      stored: storedCompanion.personaTemplate,
+      superseded: SUPERSEDED_PERSONA_TEMPLATES,
+      current: DEFAULT_PERSONA_TEMPLATE,
+      apply: (text) => {
+        settings.companion.personaTemplate = text
+      }
+    },
+    {
+      stored: storedCompanion.memoryTemplate,
+      superseded: SUPERSEDED_MEMORY_TEMPLATES,
+      current: DEFAULT_MEMORY_TEMPLATE,
+      apply: (text) => {
+        settings.companion.memoryTemplate = text
+      }
+    }
+  ]
+
+  for (const entry of templates) {
+    const next = migratedTemplate(entry.stored, entry.superseded, entry.current)
+    if (next === null) continue
+    entry.apply(next)
     migrated = true
   }
 

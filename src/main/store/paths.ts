@@ -16,6 +16,7 @@ export function getDataDirOverride(): string | null {
 export function getPaths(): AppPaths {
   const userData = app.getPath('userData')
   const dataDir = dataDirOverride ?? userData
+  const memoryDir = join(dataDir, 'memory')
 
   return {
     userData,
@@ -24,6 +25,10 @@ export function getPaths(): AppPaths {
     conversationsDir: join(dataDir, 'conversations'),
     attachmentsDir: join(dataDir, 'attachments'),
     skillsDir: join(dataDir, 'skills'),
+    memoryDir,
+    personasDir: join(memoryDir, 'personas'),
+    heartbeatFile: join(memoryDir, 'heartbeat.json'),
+    memoryFile: join(memoryDir, 'memory.json'),
     presetsFile: join(dataDir, 'presets.json'),
     settingsFile: join(dataDir, 'settings.json'),
     mcpConfigFile: join(dataDir, 'mcp.json'),
@@ -55,6 +60,8 @@ export function ensureDataDirs(): void {
     paths.conversationsDir,
     paths.attachmentsDir,
     paths.skillsDir,
+    paths.memoryDir,
+    paths.personasDir,
     paths.logsDir
   ]) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })

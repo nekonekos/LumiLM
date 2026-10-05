@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, readdirSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Conversation, ConversationMeta, SamplingParams } from '@shared/types'
+import type {
+  ChatMode,
+  Conversation,
+  ConversationCompanion,
+  ConversationMeta,
+  SamplingParams
+} from '@shared/types'
 import { DEFAULT_SAMPLING } from '@shared/types'
 import { readJsonSync, writeJsonAtomicSync } from '../util/atomic-json'
 import { logger } from '../util/logger'
@@ -41,7 +47,9 @@ function toMeta(conversation: Conversation): ConversationMeta {
     pinned: conversation.pinned,
     archived: conversation.archived,
     modelId: conversation.modelId,
+    mode: conversation.mode,
     messageCount: conversation.messages.length,
+    unreadCount: conversation.messages.filter((message) => message.unread === true).length,
     preview: derivePreview(conversation.messages)
   }
 }
@@ -55,15 +63,33 @@ function sortMetas(metas: ConversationMeta[]): ConversationMeta[] {
 
 /**
  * Conversations written before the extension system existed have no `mode` or
- * `agent` field. Filling them in here keeps the rest of the code free of
+ * `agent` field, and those written before the companion existed have no
+ * `companion` field. Filling both in here keeps the rest of the code free of
  * optional chaining and guarantees that old files open in plain chat mode.
  */
 export function normalizeConversation(conversation: Conversation): Conversation {
   return {
     ...conversation,
-    mode: conversation.mode === 'agent' ? 'agent' : 'chat',
-    agent: conversation.agent && typeof conversation.agent === 'object' ? conversation.agent : {}
+    mode: normalizeMode(conversation.mode),
+    agent: conversation.agent && typeof conversation.agent === 'object' ? conversation.agent : {},
+    companion: normalizeCompanion(conversation.companion)
   }
+}
+
+function normalizeMode(mode: unknown): ChatMode {
+  if (mode === 'agent' || mode === 'companion') return mode
+  return 'chat'
+}
+
+/** Fills in the per-conversation overrides so a turn never has to guard against missing fields. */
+function normalizeCompanion(value: unknown): ConversationCompanion {
+  const raw = value && typeof value === 'object' ? (value as Partial<ConversationCompanion>) : {}
+  const companion: ConversationCompanion = {}
+  if (raw.cardId !== undefined) companion.cardId = raw.cardId
+  if (raw.personaOverride !== undefined) companion.personaOverride = raw.personaOverride
+  if (raw.memoryEnabled !== undefined) companion.memoryEnabled = raw.memoryEnabled
+  if (raw.firstMessageShown !== undefined) companion.firstMessageShown = raw.firstMessageShown
+  return companion
 }
 
 class ConversationStore {
@@ -116,7 +142,12 @@ class ConversationStore {
     return parsed ? normalizeConversation(parsed) : null
   }
 
-  create(init?: { modelId?: string | null; title?: string; sampling?: SamplingParams }): Conversation {
+  create(init?: {
+    modelId?: string | null
+    title?: string
+    sampling?: SamplingParams
+    mode?: ChatMode
+  }): Conversation {
     const now = Date.now()
     const conversation: Conversation = {
       id: randomUUID(),
@@ -130,8 +161,9 @@ class ConversationStore {
       sampling: init?.sampling ? { ...DEFAULT_SAMPLING, ...init.sampling } : { ...DEFAULT_SAMPLING },
       // Hardcoding this made the `默认模式` setting a no-op: every new
       // conversation opened in 纯对话 no matter what was configured.
-      mode: settingsStore.get().agent.defaultMode,
+      mode: init?.mode ?? settingsStore.get().agent.defaultMode,
       agent: {},
+      companion: normalizeCompanion(undefined),
       messages: []
     }
     this.write(conversation)

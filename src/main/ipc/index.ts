@@ -5,8 +5,10 @@ import { mcpManager } from '../mcp/manager'
 import { emitMcpStatus, emitServerLog, emitServerState, emitSettingsChanged } from './events'
 import { registerAgentHandlers } from './agent'
 import { registerChatHandlers } from './chat'
+import { registerCompanionHandlers } from './companion'
 import { registerConversationHandlers } from './conversations'
 import { registerMcpHandlers } from './mcp'
+import { registerMemoryHandlers } from './memory'
 import { registerModelHandlers } from './models'
 import { registerSettingsHandlers } from './settings'
 import { registerSkillHandlers } from './skills'
@@ -21,6 +23,8 @@ export function registerAllHandlers(): void {
   registerMcpHandlers()
   registerChatHandlers()
   registerAgentHandlers()
+  registerCompanionHandlers()
+  registerMemoryHandlers()
 }
 
 /** Forwards main-process events to the renderer window. */

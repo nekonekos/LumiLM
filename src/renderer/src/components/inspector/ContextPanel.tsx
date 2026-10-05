@@ -10,7 +10,11 @@ const BLOCK_LABELS: Record<PromptBlockInfo['id'], MessageKey> = {
   user: 'agent.blockUser',
   preamble: 'agent.blockPreamble',
   skills: 'agent.blockSkills',
-  servers: 'agent.blockServers'
+  servers: 'agent.blockServers',
+  persona: 'companion.card',
+  relationship: 'companion.relationship',
+  memory: 'memory.facts',
+  summary: 'agent.contextTitle'
 }
 
 /**
@@ -26,18 +30,35 @@ export function ContextPanel(): ReactNode {
 
   const mode = conversation?.mode ?? 'chat'
   const agent = conversation?.agent
+  const companion = conversation?.companion
+  const conversationId = conversation?.id
   const systemPrompt = conversation?.systemPrompt ?? ''
   const injectPrompt = agent?.injectPrompt ?? settings?.agent.injectPrompt ?? true
 
   // Derived loading state: a result is stale as soon as the inputs change.
-  const requestKey = JSON.stringify([systemPrompt, mode, agent ?? null, injectPrompt])
+  const requestKey = JSON.stringify([
+    systemPrompt,
+    mode,
+    agent ?? null,
+    companion ?? null,
+    injectPrompt,
+    conversationId ?? null
+  ])
   const loading = result?.key !== requestKey
   const preview = result?.preview ?? null
 
   useEffect(() => {
+    if (!conversationId) return
     let cancelled = false
-    void window.lumilm.agent
-      .previewPrompt({ systemPrompt, mode, agent })
+    const request = { systemPrompt, mode, agent, companion, conversationId }
+    // Each mode composes its own prompt, so the preview comes from the channel
+    // that would actually run the turn.
+    const pending =
+      mode === 'companion'
+        ? window.lumilm.companion.previewPrompt(request)
+        : window.lumilm.agent.previewPrompt(request)
+
+    void pending
       .then((next) => {
         if (!cancelled) setResult({ key: requestKey, preview: next })
       })
@@ -47,7 +68,7 @@ export function ContextPanel(): ReactNode {
     return () => {
       cancelled = true
     }
-  }, [requestKey, systemPrompt, mode, agent])
+  }, [requestKey, systemPrompt, mode, agent, companion, conversationId])
 
   if (!conversation) {
     return <EmptyHint>{t('chat.systemPromptEmpty')}</EmptyHint>
@@ -145,6 +166,18 @@ export function ContextPanel(): ReactNode {
           <SectionTitle>{t('agent.effectivePrompt')}</SectionTitle>
           <pre className="mt-1.5 max-h-80 overflow-auto rounded-[9px] bg-surface-3/60 px-2.5 py-2 font-mono text-[11px] whitespace-pre-wrap text-fg-muted">
             {preview.text}
+          </pre>
+        </div>
+      ) : null}
+
+      {preview && preview.injection ? (
+        <div>
+          <SectionTitle>{t('agent.contextTitle')}</SectionTitle>
+          <p className="mt-1 text-[10px] leading-snug text-fg-subtle">
+            {t('memory.injectionUserSuffix')} · {preview.injectionTokens ?? 0} {t('agent.tokens')}
+          </p>
+          <pre className="mt-1.5 max-h-72 overflow-auto rounded-[9px] bg-surface-3/60 px-2.5 py-2 font-mono text-[11px] whitespace-pre-wrap text-fg-muted">
+            {preview.injection}
           </pre>
         </div>
       ) : null}

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { SlidersHorizontal, X } from 'lucide-react'
 import { IconButton, Tabs } from '@/components/ui'
+import { CompanionPanel, MemoryPanel } from './CompanionPanel'
 import { ContextPanel } from './ContextPanel'
 import { RuntimePanel } from './RuntimePanel'
 import { SamplingPanel } from './SamplingPanel'
@@ -11,13 +12,22 @@ import { useT } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
 import { useUiStore } from '@/stores/ui'
 
-type InspectorTab = 'sampling' | 'runtime' | 'system' | 'context' | 'skills' | 'tools'
+type InspectorTab =
+  | 'sampling'
+  | 'runtime'
+  | 'system'
+  | 'context'
+  | 'companion'
+  | 'memory'
+  | 'skills'
+  | 'tools'
 
 /** Right-hand panel: everything that controls how the model runs and answers. */
 export function Inspector(): ReactNode {
   const t = useT()
   const toggleInspector = useUiStore((state) => state.toggleInspector)
   const conversationId = useChatStore((state) => state.conversation?.id ?? null)
+  const mode = useChatStore((state) => state.conversation?.mode ?? 'chat')
   const [tab, setTab] = useState<InspectorTab>('sampling')
 
   return (
@@ -39,6 +49,12 @@ export function Inspector(): ReactNode {
             { value: 'runtime', label: t('params.runtime') },
             { value: 'system', label: t('params.promptTab') },
             { value: 'context', label: t('agent.contextTitle') },
+            ...(mode === 'companion'
+              ? ([
+                  { value: 'companion' as const, label: t('companion.tab') },
+                  { value: 'memory' as const, label: t('memory.tab') }
+                ])
+              : []),
             { value: 'skills', label: t('skills.title') },
             { value: 'tools', label: t('mcp.tools') }
           ]}
@@ -50,6 +66,8 @@ export function Inspector(): ReactNode {
         {tab === 'runtime' ? <RuntimePanel /> : null}
         {tab === 'system' ? <SystemPanel key={conversationId ?? 'none'} /> : null}
         {tab === 'context' ? <ContextPanel key={conversationId ?? 'none'} /> : null}
+        {tab === 'companion' ? <CompanionPanel key={conversationId ?? 'none'} /> : null}
+        {tab === 'memory' ? <MemoryPanel key={conversationId ?? 'none'} /> : null}
         {tab === 'skills' ? <SkillsPanel /> : null}
         {tab === 'tools' ? <ToolsPanel /> : null}
       </div>

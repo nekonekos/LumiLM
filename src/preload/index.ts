@@ -8,10 +8,13 @@ import type {
   BackendKind,
   ChatRequest,
   ChatStreamEvent,
+  ChatMode,
+  CompanionOverview,
   Conversation,
   ConversationMeta,
   DeepPartial,
   HardwareInfo,
+  HeartbeatEvent,
   LoadOptions,
   LumiLMApi,
   McpPromptInfo,
@@ -19,13 +22,20 @@ import type {
   McpServerConfig,
   McpServerState,
   McpToolInfo,
+  MemoryEpisode,
+  MemoryFact,
+  MemoryHit,
+  MemoryQuery,
+  MemoryStats,
   ModelInfo,
   ModelSuggestion,
   PerfPreset,
+  PersonaCard,
   PromptPreview,
   PromptPreviewInput,
   PromptPreset,
   RecommendedParams,
+  RelationshipState,
   SamplingParams,
   ServerState,
   SkillInfo,
@@ -129,7 +139,7 @@ const api: LumiLMApi = {
   conversations: {
     list: () => ipcRenderer.invoke(CH.conversations.list) as Promise<ConversationMeta[]>,
     get: (id: string) => ipcRenderer.invoke(CH.conversations.get, id) as Promise<Conversation | null>,
-    create: (init?: { modelId?: string | null; title?: string }) =>
+    create: (init?: { modelId?: string | null; title?: string; mode?: ChatMode }) =>
       ipcRenderer.invoke(CH.conversations.create, init) as Promise<Conversation>,
     save: (conversation: Conversation) =>
       ipcRenderer.invoke(CH.conversations.save, conversation) as Promise<void>,
@@ -140,6 +150,50 @@ const api: LumiLMApi = {
       ipcRenderer.invoke(CH.conversations.exportToFile, id, format) as Promise<string | null>,
     importFromFile: () =>
       ipcRenderer.invoke(CH.conversations.importFromFile) as Promise<Conversation | null>
+  },
+  companion: {
+    overview: () => ipcRenderer.invoke(CH.companion.overview) as Promise<CompanionOverview>,
+    send: (request: ChatRequest) => ipcRenderer.invoke(CH.companion.send, request) as Promise<void>,
+    abort: (streamId: string) =>
+      ipcRenderer.invoke(CH.companion.abort, streamId) as Promise<void>,
+    previewPrompt: (input: PromptPreviewInput) =>
+      ipcRenderer.invoke(CH.companion.previewPrompt, input) as Promise<PromptPreview>,
+    updateRelationship: (patch: Partial<RelationshipState>) =>
+      ipcRenderer.invoke(CH.companion.updateRelationship, patch) as Promise<CompanionOverview>,
+    setHeartbeat: (patch: { enabled?: boolean; snoozeMinutes?: number }) =>
+      ipcRenderer.invoke(CH.companion.setHeartbeat, patch) as Promise<CompanionOverview>,
+    heartbeatTest: () => ipcRenderer.invoke(CH.companion.heartbeatTest) as Promise<boolean>,
+    dreamNow: () => ipcRenderer.invoke(CH.companion.dreamNow) as Promise<CompanionOverview>
+  },
+  memory: {
+    list: (query?: MemoryQuery) =>
+      ipcRenderer.invoke(CH.memory.list, query) as Promise<MemoryFact[]>,
+    stats: () => ipcRenderer.invoke(CH.memory.stats) as Promise<MemoryStats>,
+    recall: (query: string, limit?: number) =>
+      ipcRenderer.invoke(CH.memory.recall, query, limit) as Promise<MemoryHit[]>,
+    update: (id: string, patch: Partial<MemoryFact>) =>
+      ipcRenderer.invoke(CH.memory.update, id, patch) as Promise<MemoryFact[]>,
+    remove: (id: string) => ipcRenderer.invoke(CH.memory.remove, id) as Promise<MemoryFact[]>,
+    removeMany: (ids: string[]) =>
+      ipcRenderer.invoke(CH.memory.removeMany, ids) as Promise<MemoryFact[]>,
+    approve: (ids: string[], accept: boolean) =>
+      ipcRenderer.invoke(CH.memory.approve, ids, accept) as Promise<MemoryFact[]>,
+    episodes: () => ipcRenderer.invoke(CH.memory.episodes) as Promise<MemoryEpisode[]>,
+    forgetAll: () => ipcRenderer.invoke(CH.memory.forgetAll) as Promise<void>,
+    exportToFile: () => ipcRenderer.invoke(CH.memory.export) as Promise<string | null>,
+    importFromFile: () => ipcRenderer.invoke(CH.memory.import) as Promise<MemoryFact[] | null>
+  },
+  personas: {
+    list: () => ipcRenderer.invoke(CH.personas.list) as Promise<PersonaCard[]>,
+    save: (card: PersonaCard) => ipcRenderer.invoke(CH.personas.save, card) as Promise<PersonaCard[]>,
+    remove: (id: string) => ipcRenderer.invoke(CH.personas.remove, id) as Promise<PersonaCard[]>,
+    importFromFile: () => ipcRenderer.invoke(CH.personas.import) as Promise<PersonaCard | null>,
+    exportToFile: (id: string) =>
+      ipcRenderer.invoke(CH.personas.export, id) as Promise<string | null>,
+    detectImage: (id: string) =>
+      ipcRenderer.invoke(CH.personas.detectImage, id) as Promise<string | null>,
+    restoreBuiltin: () =>
+      ipcRenderer.invoke(CH.personas.restoreBuiltin) as Promise<PersonaCard[]>
   },
   presets: {
     list: () => ipcRenderer.invoke(CH.presets.list) as Promise<PromptPreset[]>,
@@ -174,6 +228,11 @@ const api: LumiLMApi = {
     onServerLog: (cb: (line: string) => void) => subscribe(CH.events.serverLog, cb),
     onChatStream: (cb: (event: ChatStreamEvent) => void) => subscribe(CH.events.chatStream, cb),
     onAgentStream: (cb: (event: ChatStreamEvent) => void) => subscribe(CH.events.agentStream, cb),
+    onCompanionStream: (cb: (event: ChatStreamEvent) => void) =>
+      subscribe(CH.events.companionStream, cb),
+    onHeartbeat: (cb: (event: HeartbeatEvent) => void) => subscribe(CH.events.heartbeat, cb),
+    onMemoryChanged: (cb: (overview: CompanionOverview) => void) =>
+      subscribe(CH.events.memoryChanged, cb),
     onSettingsChanged: (cb: (settings: AppSettings) => void) =>
       subscribe(CH.events.settingsChanged, cb),
     onMcpStatus: (cb: (servers: McpServerState[]) => void) => subscribe(CH.events.mcpStatus, cb),
