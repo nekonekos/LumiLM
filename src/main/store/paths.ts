@@ -23,8 +23,10 @@ export function getPaths(): AppPaths {
     modelsDir: join(dataDir, 'models'),
     conversationsDir: join(dataDir, 'conversations'),
     attachmentsDir: join(dataDir, 'attachments'),
+    skillsDir: join(dataDir, 'skills'),
     presetsFile: join(dataDir, 'presets.json'),
     settingsFile: join(dataDir, 'settings.json'),
+    mcpConfigFile: join(dataDir, 'mcp.json'),
     logsDir: join(dataDir, 'logs'),
     llamaRoot: resolveLlamaRoot()
   }
@@ -52,6 +54,7 @@ export function ensureDataDirs(): void {
     paths.modelsDir,
     paths.conversationsDir,
     paths.attachmentsDir,
+    paths.skillsDir,
     paths.logsDir
   ]) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })

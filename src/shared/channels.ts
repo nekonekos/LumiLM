@@ -36,7 +36,35 @@ export const CH = {
   },
   chat: {
     send: 'chat:send',
-    abort: 'chat:abort'
+    abort: 'chat:abort',
+    approveTool: 'chat:approve-tool'
+  },
+  agent: {
+    previewPrompt: 'agent:preview-prompt'
+  },
+  mcp: {
+    list: 'mcp:list',
+    configs: 'mcp:configs',
+    runtime: 'mcp:runtime',
+    detectRuntime: 'mcp:detect-runtime',
+    save: 'mcp:save',
+    remove: 'mcp:remove',
+    connect: 'mcp:connect',
+    disconnect: 'mcp:disconnect',
+    restart: 'mcp:restart',
+    tools: 'mcp:tools',
+    prompts: 'mcp:prompts',
+    getPrompt: 'mcp:get-prompt',
+    importConfig: 'mcp:import-config',
+    revealConfig: 'mcp:reveal-config'
+  },
+  skills: {
+    list: 'skills:list',
+    refresh: 'skills:refresh',
+    addDirectory: 'skills:add-directory',
+    removeDirectory: 'skills:remove-directory',
+    openFolder: 'skills:open-folder',
+    revealFile: 'skills:reveal-file'
   },
   conversations: {
     list: 'conversations:list',
@@ -70,6 +98,7 @@ export const CH = {
     serverLog: 'event:server-log',
     chatStream: 'event:chat-stream',
     settingsChanged: 'event:settings-changed',
+    mcpStatus: 'event:mcp-status',
     toast: 'event:toast'
   }
 } as const

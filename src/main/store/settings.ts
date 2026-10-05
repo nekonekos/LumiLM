@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import type { AppSettings, DeepPartial } from '@shared/types'
+import { DEFAULT_AGENT_PREAMBLE } from '@shared/types'
 import { readJsonSync, writeJsonAtomicSync } from '../util/atomic-json'
 import { logger, toError } from '../util/logger'
 import { ensureDataDirs, getPaths, setDataDirOverride } from './paths'
 
-const SETTINGS_VERSION = 1
+const SETTINGS_VERSION = 2
 
 export const DEFAULT_SETTINGS: AppSettings = {
   version: SETTINGS_VERSION,
@@ -46,6 +47,28 @@ export const DEFAULT_SETTINGS: AppSettings = {
   advanced: {
     logLevel: 'info',
     updateCheck: false
+  },
+  agent: {
+    defaultMode: 'chat',
+    permission: 'ask-risky',
+    maxIterations: 6,
+    maxToolResultChars: 8000,
+    toolSchemaTokenWarn: 1500,
+    injectPrompt: true,
+    preambleTemplate: DEFAULT_AGENT_PREAMBLE,
+    parseTextToolCalls: true,
+    workspaceToolsEnabled: false,
+    workspaceRoot: null,
+    allowRemoteMcp: false
+  },
+  mcp: {
+    autoConnect: true,
+    toolPermissions: {},
+    callTimeoutMs: 60000
+  },
+  skills: {
+    directories: [],
+    defaultEnabledIds: []
   },
   ui: {
     sidebarWidth: 268,

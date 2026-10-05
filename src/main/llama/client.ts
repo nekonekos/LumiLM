@@ -1,9 +1,21 @@
 import type { ChatRequest, ChatRequestMessage, SamplingParams } from '@shared/types'
+import type { OpenAiTool } from '../mcp/registry'
 import { logger, toError } from '../util/logger'
 
 export interface ChatDelta {
   content?: string
   reasoning?: string
+}
+
+/** A tool call as reported by llama-server, before namespacing. */
+export interface RawToolCall {
+  id: string
+  name: string
+  args: Record<string, unknown>
+  /** raw JSON string, kept so a parse failure can be explained to the model */
+  argsRaw: string
+  /** true when `argsRaw` was not valid JSON */
+  invalid: boolean
 }
 
 export interface ChatTimings {
@@ -30,12 +42,25 @@ interface ServerTimings {
 
 interface StreamChunk {
   choices?: Array<{
-    delta?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null }
+    delta?: {
+      content?: string | null
+      reasoning_content?: string | null
+      reasoning?: string | null
+      tool_calls?: ToolCallDelta[]
+    }
+    message?: { tool_calls?: ToolCallDelta[] }
     finish_reason?: string | null
   }>
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
   timings?: ServerTimings
   error?: { message?: string } | string
+}
+
+interface ToolCallDelta {
+  index?: number
+  id?: string
+  type?: string
+  function?: { name?: string; arguments?: string }
 }
 
 export function buildSamplingPayload(sampling: SamplingParams): Record<string, unknown> {
@@ -67,19 +92,114 @@ export function toApiMessages(
 
   for (const message of messages) {
     if (message.role === 'system') continue
+
+    if (message.role === 'tool') {
+      apiMessages.push({
+        role: 'tool',
+        tool_call_id: message.toolCallId ?? 'unknown',
+        content: message.content
+      })
+      continue
+    }
+
+    const entry: Record<string, unknown> = { role: message.role }
+
     if (message.images && message.images.length > 0) {
       const parts: Array<Record<string, unknown>> = []
       if (message.content.length > 0) parts.push({ type: 'text', text: message.content })
       for (const image of message.images) {
         parts.push({ type: 'image_url', image_url: { url: image } })
       }
-      apiMessages.push({ role: message.role, content: parts })
+      entry.content = parts
     } else {
-      apiMessages.push({ role: message.role, content: message.content })
+      entry.content = message.content
     }
+
+    // llama.cpp renders the tool results from this declaration, so it has to
+    // travel with the assistant message that requested them.
+    if (message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0) {
+      entry.tool_calls = message.toolCalls.map((call) => ({
+        id: call.id,
+        type: 'function',
+        function: { name: call.name, arguments: JSON.stringify(call.args) }
+      }))
+    }
+
+    apiMessages.push(entry)
   }
 
   return apiMessages
+}
+
+export interface StreamOptions {
+  /** OpenAI-style function definitions; omitted entirely in plain chat mode. */
+  tools?: OpenAiTool[]
+  toolChoice?: string
+}
+
+interface ToolCallAccumulator {
+  id: string
+  name: string
+  args: string
+}
+
+/**
+ * OpenAI streams a tool call across many chunks: the first carries `id` and the
+ * function name, the rest append fragments of the `arguments` JSON string.
+ * Everything is keyed by `index` and joined at the end.
+ */
+export class ToolCallCollector {
+  private entries = new Map<number, ToolCallAccumulator>()
+
+  push(deltas: ToolCallDelta[] | undefined): void {
+    if (!deltas) return
+    for (const delta of deltas) {
+      const index = delta.index ?? 0
+      const entry = this.entries.get(index) ?? { id: '', name: '', args: '' }
+      if (typeof delta.id === 'string' && delta.id.length > 0) entry.id = delta.id
+      if (typeof delta.function?.name === 'string' && delta.function.name.length > 0) {
+        // Some builds resend the full name instead of an empty fragment.
+        entry.name = entry.name.length === 0 ? delta.function.name : entry.name + delta.function.name
+      }
+      if (typeof delta.function?.arguments === 'string') entry.args += delta.function.arguments
+      this.entries.set(index, entry)
+    }
+  }
+
+  isEmpty(): boolean {
+    return this.entries.size === 0
+  }
+
+  finish(): RawToolCall[] {
+    return [...this.entries.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([index, entry]) => {
+        if (entry.name.length === 0) return null
+        let args: Record<string, unknown> = {}
+        let invalid = false
+        const raw = entry.args.trim()
+        if (raw.length > 0) {
+          try {
+            const parsed = JSON.parse(raw) as unknown
+            if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+              args = parsed as Record<string, unknown>
+            } else {
+              invalid = true
+            }
+          } catch {
+            invalid = true
+          }
+        }
+        return {
+          id: entry.id.length > 0 ? entry.id : `call_${index}`,
+          name: entry.name,
+          args,
+          argsRaw: raw,
+          invalid
+        } satisfies RawToolCall
+      })
+      .filter((call): call is RawToolCall => call !== null)
+  }
 }
 
 export class LlamaClient {
@@ -147,14 +267,20 @@ export class LlamaClient {
   async streamChat(
     request: ChatRequest,
     callbacks: StreamCallbacks,
-    signal: AbortSignal
-  ): Promise<ChatTimings> {
-    const body = {
+    signal: AbortSignal,
+    options?: StreamOptions
+  ): Promise<ChatTimings & { toolCalls: RawToolCall[] }> {
+    const body: Record<string, unknown> = {
       model: 'lumilm',
       messages: toApiMessages(request.systemPrompt, request.messages),
       stream: true,
       stream_options: { include_usage: true },
       ...buildSamplingPayload(request.sampling)
+    }
+
+    if (options?.tools && options.tools.length > 0) {
+      body.tools = options.tools
+      body.tool_choice = options.toolChoice ?? 'auto'
     }
 
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
@@ -173,6 +299,7 @@ export class LlamaClient {
     const decoder = new TextDecoder()
     let buffer = ''
     const timings: ChatTimings = {}
+    const collector = new ToolCallCollector()
 
     while (true) {
       const { done, value } = await reader.read()
@@ -183,16 +310,21 @@ export class LlamaClient {
       while (separator >= 0) {
         const rawEvent = buffer.slice(0, separator)
         buffer = buffer.slice(separator + 2)
-        this.handleEvent(rawEvent, callbacks, timings)
+        this.handleEvent(rawEvent, callbacks, timings, collector)
         separator = buffer.indexOf('\n\n')
       }
     }
 
-    if (buffer.trim().length > 0) this.handleEvent(buffer, callbacks, timings)
-    return timings
+    if (buffer.trim().length > 0) this.handleEvent(buffer, callbacks, timings, collector)
+    return { ...timings, toolCalls: collector.finish() }
   }
 
-  private handleEvent(rawEvent: string, callbacks: StreamCallbacks, timings: ChatTimings): void {
+  private handleEvent(
+    rawEvent: string,
+    callbacks: StreamCallbacks,
+    timings: ChatTimings,
+    collector: ToolCallCollector
+  ): void {
     for (const line of rawEvent.split(/\r?\n/)) {
       if (!line.startsWith('data:')) continue
       const payload = line.slice(5).trim()
@@ -216,7 +348,10 @@ export class LlamaClient {
         const reasoning = choice.delta.reasoning_content ?? choice.delta.reasoning ?? undefined
         const content = choice.delta.content ?? undefined
         if (content || reasoning) callbacks.onDelta({ content, reasoning: reasoning ?? undefined })
+        collector.push(choice.delta.tool_calls)
       }
+      // A non-streaming build may deliver the whole call on the message instead.
+      if (choice?.message?.tool_calls) collector.push(choice.message.tool_calls)
       if (choice?.finish_reason) callbacks.onFinishReason(choice.finish_reason)
 
       if (chunk.usage) {

@@ -20,6 +20,7 @@ export function createInitialServerState(): ServerState {
     progress: null,
     degradedRetries: 0,
     commandLine: null,
+    supportsTools: null,
     metrics: null
   }
 }

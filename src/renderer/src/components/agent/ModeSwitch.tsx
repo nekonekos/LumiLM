@@ -1,0 +1,88 @@
+import type { ReactNode } from 'react'
+import { Bot, MessageSquare } from 'lucide-react'
+import type { AgentPermission } from '@shared/types'
+import { Select } from '@/components/ui'
+import { cn } from '@/lib/cn'
+import { useT, type MessageKey } from '@/i18n'
+import { useAgentStore } from '@/stores/agent'
+import { useChatStore } from '@/stores/chat'
+import { useSettingsStore } from '@/stores/settings'
+
+const PERMISSIONS: AgentPermission[] = ['ask-all', 'ask-risky', 'auto']
+
+const PERMISSION_LABELS: Record<AgentPermission, MessageKey> = {
+  'ask-all': 'agent.permissionAskAll',
+  'ask-risky': 'agent.permissionAskRisky',
+  auto: 'agent.permissionAuto'
+}
+
+const PERMISSION_HINTS: Record<AgentPermission, MessageKey> = {
+  'ask-all': 'agent.permissionAskAllHint',
+  'ask-risky': 'agent.permissionAskRiskyHint',
+  auto: 'agent.permissionAutoHint'
+}
+
+/**
+ * The per-conversation switch between plain chat and the tool-calling agent.
+ * Chat mode is the default and keeps LumiLM's "no injected prompt" promise.
+ */
+export function ModeSwitch(): ReactNode {
+  const t = useT()
+  const conversation = useChatStore((state) => state.conversation)
+  const setMode = useAgentStore((state) => state.setMode)
+  const setPermission = useAgentStore((state) => state.setPermission)
+  const settingPermission = useSettingsStore((state) => state.settings?.agent.permission)
+
+  const mode = conversation?.mode ?? 'chat'
+  const permission = conversation?.agent.permission ?? settingPermission ?? 'ask-risky'
+  const disabled = !conversation
+
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className="inline-flex items-center rounded-[8px] border border-border bg-surface-2 p-0.5"
+        role="radiogroup"
+        aria-label={t('agent.mode')}
+      >
+        {(['chat', 'agent'] as const).map((value) => {
+          const active = mode === value
+          const Icon = value === 'chat' ? MessageSquare : Bot
+          return (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              disabled={disabled}
+              title={t(value === 'chat' ? 'agent.modeChatHint' : 'agent.modeAgentHint')}
+              onClick={() => void setMode(value)}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11px] transition-colors',
+                active ? 'bg-brand text-brand-fg' : 'text-fg-muted hover:text-fg',
+                disabled && 'cursor-not-allowed opacity-50'
+              )}
+            >
+              <Icon className="size-3" />
+              {t(value === 'chat' ? 'agent.modeChat' : 'agent.modeAgent')}
+            </button>
+          )
+        })}
+      </div>
+
+      {mode === 'agent' ? (
+        <span title={t(PERMISSION_HINTS[permission])} className="inline-flex">
+          <Select<AgentPermission>
+            value={permission}
+            disabled={disabled}
+            options={PERMISSIONS.map((value) => ({
+              value,
+              label: t(PERMISSION_LABELS[value])
+            }))}
+            onChange={(value) => void setPermission(value)}
+            className="w-32"
+          />
+        </span>
+      ) : null}
+    </div>
+  )
+}

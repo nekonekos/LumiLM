@@ -1,6 +1,12 @@
 import type { WebContents } from 'electron'
 import { CH } from '@shared/channels'
-import type { ChatStreamEvent, ServerState, AppSettings, ToastPayload } from '@shared/types'
+import type {
+  ChatStreamEvent,
+  McpServerState,
+  ServerState,
+  AppSettings,
+  ToastPayload
+} from '@shared/types'
 
 let target: WebContents | null = null
 
@@ -27,6 +33,10 @@ export function emitChatStream(event: ChatStreamEvent): void {
 
 export function emitSettingsChanged(settings: AppSettings): void {
   send(CH.events.settingsChanged, settings)
+}
+
+export function emitMcpStatus(servers: McpServerState[]): void {
+  send(CH.events.mcpStatus, servers)
 }
 
 export function emitToast(toast: ToastPayload): void {

@@ -7,12 +7,16 @@ import { registerAllHandlers, wireEventForwarding } from './ipc'
 import { setEventTarget } from './ipc/events'
 import { abortAllStreams } from './ipc/chat'
 import { serverManager } from './llama/server-manager'
+import { mcpManager } from './mcp/manager'
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
 
 function enforceOfflinePolicy(): void {
   const devOrigin = process.env['ELECTRON_RENDERER_URL']
 
+  // Only the renderer's session is filtered. Main process network calls (used
+  // by remote MCP transports) do not go through this hook, which is why
+  // remote servers stay behind an explicit opt-in in Settings → Agent.
   session.defaultSession.webRequest.onBeforeRequest(
     { urls: ['http://*/*', 'https://*/*'] },
     (details, callback) => {
@@ -59,6 +63,11 @@ async function bootstrap(): Promise<void> {
   setEventTarget(win.webContents)
   applyThemeSource(settings.general.themeMode)
 
+  // MCP servers are started only after the renderer can receive status events.
+  void mcpManager.initialize(app.getVersion()).catch((error) => {
+    logger.warn('mcp', `initialization failed: ${toError(error).message}`)
+  })
+
   nativeTheme.on('updated', () => {
     applyThemeSource(settingsStore.get().general.themeMode)
   })
@@ -88,8 +97,7 @@ app.on('before-quit', (event) => {
   event.preventDefault()
 
   abortAllStreams()
-  void serverManager
-    .shutdown()
+  void Promise.allSettled([serverManager.shutdown(), mcpManager.shutdown()])
     .catch((error) => logger.warn('app', `shutdown error: ${toError(error).message}`))
     .finally(() => {
       setEventTarget(null)

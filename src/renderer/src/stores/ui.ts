@@ -6,7 +6,16 @@ export interface Toast extends ToastPayload {
   createdAt: number
 }
 
-export type SettingsTabKey = 'general' | 'appearance' | 'inference' | 'models' | 'advanced' | 'about'
+export type SettingsTabKey =
+  | 'general'
+  | 'appearance'
+  | 'inference'
+  | 'models'
+  | 'agent'
+  | 'mcp'
+  | 'skills'
+  | 'advanced'
+  | 'about'
 
 interface UiState {
   sidebarCollapsed: boolean

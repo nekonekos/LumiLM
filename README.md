@@ -22,6 +22,8 @@
 | **三套后端** | 内置 CPU / Vulkan / CUDA(12.4) 三份 llama.cpp 二进制，启动时自动选择可用的最快后端 |
 | **多模态** | 支持 `mmproj` 视觉投影模型，可直接粘贴 / 拖拽图片提问 |
 | **无预置提示词** | 不附带任何内置人格或提示词模板；系统提示词、采样参数、预设全部由你自己建立 |
+| **可选 Agent** | 默认纯对话；切到 Agent 模式后可接入 MCP 工具与技能包，操作本地文件、Shell 等外部环境 |
+| **提示词透明** | Agent 注入的每一段提示词都可查看、可编辑、可关闭，模板与 token 占用一目了然 |
 | **高度自由** | 每个对话独立保存采样参数与系统提示词；可保存为自定义预设随时复用 |
 | **美观界面** | 浅蓝配色，可切换深色 / 跟随系统，可自定义主色调与字号 |
 | **中文优先** | 简体中文与 English 双语界面 |
@@ -113,6 +115,83 @@ LLAMA_TAG=b11390 npm run fetch:llama
 npm run fetch:llama -- --backends=cpu,vulkan
 ```
 
+## 扩展系统（Skills 与 MCP）
+
+LumiLM 默认是**纯对话**客户端：不注入任何提示词，也不向模型暴露任何工具。
+需要它动手做事时，在输入框左下角把模式切到 **Agent**。
+
+| 模式 | 行为 |
+|---|---|
+| **纯对话**（默认） | 与旧版本完全一致：只发送你自己写的系统提示词，请求中不出现 `tools` |
+| **Agent** | 注入 Agent 说明 + 工具定义，可多轮调用工具并读取结果 |
+
+Agent 模式下的权限三档：
+
+- **每次询问**：任何工具调用都需要你确认
+- **仅高风险询问**（默认）：只读工具自动执行，可能改动内容的工具需要确认
+- **全自动**：全部直接执行（高风险）
+
+### MCP 服务
+
+在「设置 → MCP」中添加服务，配置写入 `<数据目录>/mcp.json`，
+兼容 Claude Desktop 与 VS Code 的配置格式，也可以直接导入它们的配置文件。
+
+```jsonc
+{
+  "mcpServers": {
+    "filesystem": {
+      // stdio：LumiLM 会自行启动该命令并与之通信
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/work"],
+      "enabled": true,
+      "autoConnect": true,
+      "toolAllowlist": ["read_file", "list_directory"]
+    },
+    "remote": {
+      // http / sse 属于远程传输，需要在「设置 → Agent」中显式允许
+      "transport": "http",
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer …" }
+    }
+  }
+}
+```
+
+- 使用 stdio 服务需要本机已安装 **Node.js**（LumiLM 会自动探测 `node` 与 `npx`，
+  未检测到时会明确提示，且不影响纯对话使用）。
+- MCP 服务是第三方程序，会以你的身份运行代码。添加时会弹窗警示；
+  导入的配置一律以「停用」状态落地，需要你逐个启用。
+- 连接成功后，服务的 `prompts` 会成为输入框里的 `/` 斜杠命令。
+
+### 技能（Skills）
+
+在「设置 → 技能」中添加技能目录，LumiLM 会递归查找 `SKILL.md`：
+
+```markdown
+---
+name: pdf-tools
+description: 读取、拆分与合并 PDF 文件
+allowed-tools:          # 可选：限定模型可见的工具
+  - mcp__filesystem__read_file
+---
+
+正文：模型加载该技能时才会看到的详细指令。
+```
+
+也可以用一个简单 JSON 文件代替：`{ "name": …, "description": …, "systemPrompt": … }`。
+
+技能采用三级渐进披露以节省上下文：元数据（始终注入）→ 正文（模型调用
+`skills.load` 时）→ 附带文件（`skills.read_resource` 时）。
+
+### 上下文预算
+
+工具结果最容易撑爆上下文，因此在 8 GB 显存这类低配机器上 LumiLM 会：
+
+- 把单个工具结果截断到设定上限（默认 8000 字符）
+- 超出预算时优先把**较早的工具结果**替换为一行省略说明
+- 仍然超出时再成对丢弃最旧的「工具调用轮次」，绝不会留下孤立的结果
+- 展示工具定义本身占用的 token，便于精简用不到的工具
+
 ## 关键设计
 
 - **子进程而非绑定**：通过 `llama-server` 子进程 + 本地 OpenAI 兼容 HTTP/SSE 接口通信，
@@ -121,6 +200,8 @@ npm run fetch:llama -- --backends=cpu,vulkan
   可 offload 的层数，并在内存受限时收缩上下文。
 - **模型就地引用**：模型不会复制进应用数据目录，只记录路径，升级 / 重装不影响已有模型。
 - **上下文裁剪**：按中英文字符混合估算 token，保留约 82% 上下文预算给历史消息。
+- **扩展默认关闭**：扩展相关的依赖全部编译进主进程包，不需要额外的运行时目录；
+  纯对话路径完全不经过扩展代码。
 
 ## 数据存放位置
 
@@ -130,6 +211,8 @@ npm run fetch:llama -- --backends=cpu,vulkan
 | 对话 | `%APPDATA%\LumiLM\conversations\*.json` |
 | 预设 | `%APPDATA%\LumiLM\presets.json` |
 | 附件 | `%APPDATA%\LumiLM\attachments\` |
+| 技能（默认目录） | `%APPDATA%\LumiLM\skills\` |
+| MCP 配置 | `%APPDATA%\LumiLM\mcp.json` |
 | 日志 | `%APPDATA%\LumiLM\logs\lumilm.log` |
 
 可在「设置 → 通用」中改用自定义数据目录。

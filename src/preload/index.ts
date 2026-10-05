@@ -4,6 +4,7 @@ import type {
   AppInfo,
   AppPaths,
   AppSettings,
+  ApprovalDecision,
   BackendKind,
   ChatRequest,
   ChatStreamEvent,
@@ -13,13 +14,21 @@ import type {
   HardwareInfo,
   LoadOptions,
   LumiLMApi,
+  McpPromptInfo,
+  McpRuntimeInfo,
+  McpServerConfig,
+  McpServerState,
+  McpToolInfo,
   ModelInfo,
   ModelSuggestion,
   PerfPreset,
+  PromptPreview,
+  PromptPreviewInput,
   PromptPreset,
   RecommendedParams,
   SamplingParams,
   ServerState,
+  SkillInfo,
   ToastPayload,
   Unsubscribe
 } from '@shared/types'
@@ -77,7 +86,41 @@ const api: LumiLMApi = {
   },
   chat: {
     send: (request: ChatRequest) => ipcRenderer.invoke(CH.chat.send, request) as Promise<void>,
-    abort: (streamId: string) => ipcRenderer.invoke(CH.chat.abort, streamId) as Promise<void>
+    abort: (streamId: string) => ipcRenderer.invoke(CH.chat.abort, streamId) as Promise<void>,
+    approveToolCall: (streamId: string, callId: string, decision: ApprovalDecision) =>
+      ipcRenderer.invoke(CH.chat.approveTool, streamId, callId, decision) as Promise<void>
+  },
+  agent: {
+    previewPrompt: (input: PromptPreviewInput) =>
+      ipcRenderer.invoke(CH.agent.previewPrompt, input) as Promise<PromptPreview>
+  },
+  mcp: {
+    list: () => ipcRenderer.invoke(CH.mcp.list) as Promise<McpServerState[]>,
+    configs: () => ipcRenderer.invoke(CH.mcp.configs) as Promise<McpServerConfig[]>,
+    runtime: () => ipcRenderer.invoke(CH.mcp.runtime) as Promise<McpRuntimeInfo>,
+    detectRuntime: () => ipcRenderer.invoke(CH.mcp.detectRuntime) as Promise<McpRuntimeInfo>,
+    save: (config: McpServerConfig) =>
+      ipcRenderer.invoke(CH.mcp.save, config) as Promise<McpServerState[]>,
+    remove: (id: string) => ipcRenderer.invoke(CH.mcp.remove, id) as Promise<McpServerState[]>,
+    connect: (id: string) => ipcRenderer.invoke(CH.mcp.connect, id) as Promise<McpServerState[]>,
+    disconnect: (id: string) =>
+      ipcRenderer.invoke(CH.mcp.disconnect, id) as Promise<McpServerState[]>,
+    restart: (id: string) => ipcRenderer.invoke(CH.mcp.restart, id) as Promise<McpServerState[]>,
+    tools: () => ipcRenderer.invoke(CH.mcp.tools) as Promise<McpToolInfo[]>,
+    prompts: () => ipcRenderer.invoke(CH.mcp.prompts) as Promise<McpPromptInfo[]>,
+    getPrompt: (serverId: string, name: string, args: Record<string, string>) =>
+      ipcRenderer.invoke(CH.mcp.getPrompt, serverId, name, args) as Promise<string | null>,
+    importConfig: () => ipcRenderer.invoke(CH.mcp.importConfig) as Promise<McpServerConfig[] | null>,
+    revealConfig: () => ipcRenderer.invoke(CH.mcp.revealConfig) as Promise<void>
+  },
+  skills: {
+    list: () => ipcRenderer.invoke(CH.skills.list) as Promise<SkillInfo[]>,
+    refresh: () => ipcRenderer.invoke(CH.skills.refresh) as Promise<SkillInfo[]>,
+    addDirectory: () => ipcRenderer.invoke(CH.skills.addDirectory) as Promise<string | null>,
+    removeDirectory: (dir: string) =>
+      ipcRenderer.invoke(CH.skills.removeDirectory, dir) as Promise<void>,
+    openFolder: (dir: string) => ipcRenderer.invoke(CH.skills.openFolder, dir) as Promise<void>,
+    revealFile: (path: string) => ipcRenderer.invoke(CH.skills.revealFile, path) as Promise<void>
   },
   conversations: {
     list: () => ipcRenderer.invoke(CH.conversations.list) as Promise<ConversationMeta[]>,
@@ -128,6 +171,7 @@ const api: LumiLMApi = {
     onChatStream: (cb: (event: ChatStreamEvent) => void) => subscribe(CH.events.chatStream, cb),
     onSettingsChanged: (cb: (settings: AppSettings) => void) =>
       subscribe(CH.events.settingsChanged, cb),
+    onMcpStatus: (cb: (servers: McpServerState[]) => void) => subscribe(CH.events.mcpStatus, cb),
     onToast: (cb: (toast: ToastPayload) => void) => subscribe(CH.events.toast, cb)
   }
 }

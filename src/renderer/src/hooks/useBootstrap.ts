@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useChatStore } from '@/stores/chat'
+import { useMcpStore } from '@/stores/mcp'
 import { useModelsStore } from '@/stores/models'
 import { useSettingsStore } from '@/stores/settings'
+import { useSkillsStore } from '@/stores/skills'
 import { useUiStore } from '@/stores/ui'
 
 export interface BootstrapState {
@@ -29,6 +31,11 @@ export function useBootstrap(): BootstrapState {
       window.lumilm.events.onServerState((state) => chat.setServerState(state)),
       window.lumilm.events.onChatStream((event) => chat.handleStreamEvent(event)),
       window.lumilm.events.onSettingsChanged((next) => settings.applyFromEvent(next)),
+      window.lumilm.events.onMcpStatus((servers) => {
+        useMcpStore.getState().setServers(servers)
+        // Tool availability changes with the connections, so re-read them.
+        void useMcpStore.getState().refreshCapabilities()
+      }),
       window.lumilm.events.onToast((toast) => ui.pushToast(toast)),
       window.lumilm.events.onServerLog((line) => {
         useUiStore.getState().appendLog(line)
@@ -43,7 +50,9 @@ export function useBootstrap(): BootstrapState {
           models.load(),
           models.detectHardware(),
           chat.loadMetas(),
-          chat.loadServerState()
+          chat.loadServerState(),
+          useMcpStore.getState().refresh(),
+          useSkillsStore.getState().refresh()
         ])
       } catch (cause) {
         if (!cancelled) {

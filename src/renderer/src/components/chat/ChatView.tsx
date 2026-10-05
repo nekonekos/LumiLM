@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, ArrowDown, Loader2, Play, Sparkles } from 'lucide-react'
+import type { ToolCallResult } from '@shared/types'
 import { Button, ProgressBar } from '@/components/ui'
 import { Composer } from '@/components/chat/Composer'
 import { MessageBubble } from '@/components/chat/MessageBubble'
+import { ApprovalDialog } from '@/components/agent/ApprovalDialog'
 import { cn } from '@/lib/cn'
 import { useT } from '@/i18n'
+import { useAgentStore } from '@/stores/agent'
 import { useChatStore } from '@/stores/chat'
 import { useModelsStore } from '@/stores/models'
 import { useSettingsStore } from '@/stores/settings'
@@ -96,10 +99,30 @@ export function ChatView(): ReactNode {
   const pinnedRef = useRef(true)
   const [showJump, setShowJump] = useState(false)
 
-  const messages = conversation?.messages ?? []
+  const messages = useMemo(() => conversation?.messages ?? [], [conversation])
   const streamingId = stream?.messageId ?? null
 
-  const isEmpty = messages.length === 0
+  // Tool results live in sibling `tool` messages; the cards need them by call id.
+  const toolResults = useMemo(() => {
+    const map: Record<string, ToolCallResult> = {}
+    for (const message of messages) {
+      if (message.role === 'tool' && message.toolCallId && message.toolResult) {
+        map[message.toolCallId] = message.toolResult
+      }
+    }
+    return map
+  }, [messages])
+
+  // `tool` messages are folded into the card that produced them, not shown raw.
+  const visibleMessages = useMemo(
+    () => messages.filter((message) => message.role !== 'tool'),
+    [messages]
+  )
+
+  const approvals = useAgentStore((state) => state.decisions)
+  const approvalCallId = useAgentStore((state) => state.approval?.callId ?? null)
+
+  const isEmpty = visibleMessages.length === 0
   const hasModel = models.length > 0
 
   const scrollToBottom = (behavior: ScrollBehavior = 'auto'): void => {
@@ -177,7 +200,7 @@ export function ChatView(): ReactNode {
             </div>
           ) : (
             <div className={cn('flex flex-col', density === 'compact' ? 'gap-3' : 'gap-5')}>
-              {messages.map((message) => (
+              {visibleMessages.map((message) => (
                 <MessageBubble
                   key={message.id}
                   message={message}
@@ -187,6 +210,10 @@ export function ChatView(): ReactNode {
                   isStreaming={message.id === streamingId}
                   streamContent={stream?.content}
                   streamReasoning={stream?.reasoning}
+                  streamToolCalls={stream?.toolCalls}
+                  toolResults={toolResults}
+                  approvals={approvals}
+                  approvalCallId={approvalCallId}
                   canAct={stream === null}
                   onRegenerate={(id) => void regenerate(id)}
                   onEdit={(id, content) => void editMessage(id, content)}
@@ -210,6 +237,7 @@ export function ChatView(): ReactNode {
       ) : null}
 
       <Composer />
+      <ApprovalDialog />
     </div>
   )
 }

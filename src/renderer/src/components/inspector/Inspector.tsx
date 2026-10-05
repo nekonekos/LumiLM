@@ -1,14 +1,17 @@
 import { useState, type ReactNode } from 'react'
 import { SlidersHorizontal, X } from 'lucide-react'
 import { IconButton, Tabs } from '@/components/ui'
+import { ContextPanel } from './ContextPanel'
 import { RuntimePanel } from './RuntimePanel'
 import { SamplingPanel } from './SamplingPanel'
+import { SkillsPanel } from './SkillsPanel'
 import { SystemPanel } from './SystemPanel'
+import { ToolsPanel } from './ToolsPanel'
 import { useT } from '@/i18n'
 import { useChatStore } from '@/stores/chat'
 import { useUiStore } from '@/stores/ui'
 
-type InspectorTab = 'sampling' | 'runtime' | 'system'
+type InspectorTab = 'sampling' | 'runtime' | 'system' | 'context' | 'skills' | 'tools'
 
 /** Right-hand panel: everything that controls how the model runs and answers. */
 export function Inspector(): ReactNode {
@@ -34,7 +37,10 @@ export function Inspector(): ReactNode {
           tabs={[
             { value: 'sampling', label: t('params.sampling') },
             { value: 'runtime', label: t('params.runtime') },
-            { value: 'system', label: t('params.systemPrompt') }
+            { value: 'system', label: t('params.systemPrompt') },
+            { value: 'context', label: t('agent.contextTitle') },
+            { value: 'skills', label: t('skills.title') },
+            { value: 'tools', label: t('mcp.tools') }
           ]}
         />
       </div>
@@ -43,6 +49,9 @@ export function Inspector(): ReactNode {
         {tab === 'sampling' ? <SamplingPanel /> : null}
         {tab === 'runtime' ? <RuntimePanel /> : null}
         {tab === 'system' ? <SystemPanel key={conversationId ?? 'none'} /> : null}
+        {tab === 'context' ? <ContextPanel key={conversationId ?? 'none'} /> : null}
+        {tab === 'skills' ? <SkillsPanel /> : null}
+        {tab === 'tools' ? <ToolsPanel /> : null}
       </div>
     </aside>
   )

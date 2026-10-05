@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent,
 import { ImagePlus, Send, Square, X } from 'lucide-react'
 import type { Attachment } from '@shared/types'
 import { IconButton } from '@/components/ui'
+import { ModeSwitch } from '@/components/agent/ModeSwitch'
+import { SlashCommandMenu } from '@/components/chat/SlashCommandMenu'
 import { cn } from '@/lib/cn'
 import { formatBytes } from '@/lib/format'
 import {
@@ -13,6 +15,7 @@ import {
 import { useImageDataUrl } from '@/hooks/useImageDataUrl'
 import { useT } from '@/i18n'
 import { useChatStore, estimateTokens } from '@/stores/chat'
+import { useMcpStore } from '@/stores/mcp'
 import { useModelsStore } from '@/stores/models'
 import { useSettingsStore } from '@/stores/settings'
 import { useUiStore } from '@/stores/ui'
@@ -67,6 +70,7 @@ export function Composer(): ReactNode {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [dragging, setDragging] = useState(false)
+  const [slashIndex, setSlashIndex] = useState(0)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   // IME input fires Enter while the candidate window is open; sending then would
@@ -74,6 +78,29 @@ export function Composer(): ReactNode {
   const composingRef = useRef(false)
 
   const canSend = !streaming && (text.trim().length > 0 || attachments.length > 0)
+
+  const prompts = useMcpStore((state) => state.prompts)
+  // A lone leading slash opens the MCP prompt menu.
+  const slashQuery = /^\/(\S*)$/.exec(text)?.[1]
+  const slashOpen = slashQuery !== undefined && prompts.length > 0
+  const slashCount = slashOpen
+    ? prompts.filter((prompt) => {
+        const needle = (slashQuery ?? '').toLowerCase()
+        return (
+          needle.length === 0 ||
+          prompt.command.toLowerCase().includes(needle) ||
+          prompt.title.toLowerCase().includes(needle) ||
+          prompt.description.toLowerCase().includes(needle)
+        )
+      }).length
+    : 0
+
+  // The menu registers its Enter handler here so the composer stays in charge of
+  // the keyboard without the menu leaking its state upward.
+  const pickRef = useRef<((index: number) => void) | null>(null)
+  const registerPick = useCallback((pick: ((index: number) => void) | null) => {
+    pickRef.current = pick
+  }, [])
 
   const focusInput = useCallback(() => {
     textareaRef.current?.focus()
@@ -113,8 +140,29 @@ export function Composer(): ReactNode {
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing || composingRef.current) return
+
+    if (slashOpen && event.key === 'Escape') {
+      event.preventDefault()
+      // Closing just rewrites the text so the menu cannot reopen.
+      setText('')
+      return
+    }
+    if (slashOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      event.preventDefault()
+      const delta = event.key === 'ArrowDown' ? 1 : -1
+      const count = Math.max(slashCount, 1)
+      setSlashIndex((current) => (current + delta + count) % count)
+      return
+    }
+    if (slashOpen && event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      pickRef.current?.(slashIndex)
+      return
+    }
+
     if (event.key !== 'Enter') return
-    if (event.shiftKey || event.nativeEvent.isComposing || composingRef.current) return
+    if (event.shiftKey) return
     event.preventDefault()
     void submit()
   }
@@ -170,6 +218,24 @@ export function Composer(): ReactNode {
       onDrop={handleDrop}
     >
       <div className="mx-auto w-full max-w-3xl">
+        {slashOpen ? (
+          <div className="relative">
+            <SlashCommandMenu
+              query={slashQuery ?? ''}
+              activeIndex={slashIndex}
+              onRegisterPick={registerPick}
+              onInsert={(value) => {
+                setText(value)
+                focusInput()
+              }}
+              onClose={() => {
+                setText('')
+                focusInput()
+              }}
+            />
+          </div>
+        ) : null}
+
         {dragging ? (
           <div className="mb-2 rounded-[10px] border border-dashed border-brand bg-brand-soft px-3 py-2 text-center text-xs text-brand">
             {t('chat.dropHint')}
@@ -206,7 +272,11 @@ export function Composer(): ReactNode {
             ref={textareaRef}
             value={text}
             rows={1}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => {
+              setText(event.target.value)
+              // The highlighted slash command resets as the query changes.
+              setSlashIndex(0)
+            }}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => {
               composingRef.current = true
@@ -261,7 +331,8 @@ export function Composer(): ReactNode {
           </div>
         </div>
 
-        <div className="mt-1.5 flex items-center justify-end px-1 text-[10px] text-fg-subtle">
+        <div className="mt-1.5 flex items-center justify-between gap-2 px-1 text-[10px] text-fg-subtle">
+          <ModeSwitch />
           {attachments.length > 0 && !activeModel?.mmprojPath ? (
             <button
               type="button"

@@ -8,7 +8,7 @@ import {
   RefreshCw,
   Trash2
 } from 'lucide-react'
-import type { Attachment, ChatMessage } from '@shared/types'
+import type { ApprovalDecision, Attachment, ChatMessage, ToolCall, ToolCallResult } from '@shared/types'
 import { Button, IconButton, TextArea } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import { formatDuration, formatSpeed } from '@/lib/format'
@@ -16,6 +16,7 @@ import { useImageDataUrl } from '@/hooks/useImageDataUrl'
 import { useAppIcon } from '@/hooks/useAppIcon'
 import { useT } from '@/i18n'
 import { MarkdownView } from './MarkdownView'
+import { ToolCallCard } from './ToolCallCard'
 
 function AttachmentThumb({ attachment }: { attachment: Attachment }): ReactNode {
   const dataUrl = useImageDataUrl(attachment.kind === 'image' ? attachment.path : null)
@@ -75,10 +76,48 @@ export interface MessageBubbleProps {
   isStreaming: boolean
   streamContent?: string
   streamReasoning?: string
+  streamToolCalls?: ToolCall[]
+  /** tool results keyed by call id */
+  toolResults: Record<string, ToolCallResult>
+  /** resolved approvals keyed by call id */
+  approvals: Record<string, ApprovalDecision>
+  /** the call the approval dialog is currently showing */
+  approvalCallId: string | null
   canAct: boolean
   onRegenerate: (messageId: string) => void
   onEdit: (messageId: string, content: string) => void
   onDelete: (messageId: string) => void
+}
+
+/**
+ * The tool calls requested by one assistant block. While the block is streaming
+ * the calls come from the live stream, otherwise they come from the message.
+ */
+function ToolCalls({
+  calls,
+  toolResults,
+  approvals,
+  approvalCallId
+}: {
+  calls: NonNullable<ChatMessage['toolCalls']>
+  toolResults: Record<string, ToolCallResult>
+  approvals: Record<string, ApprovalDecision>
+  approvalCallId: string | null
+}): ReactNode {
+  if (calls.length === 0) return null
+  return (
+    <div className="w-full">
+      {calls.map((call) => (
+        <ToolCallCard
+          key={call.id}
+          call={call}
+          result={toolResults[call.id] ?? null}
+          decision={approvals[call.id] ?? null}
+          awaitingApproval={approvalCallId === call.id}
+        />
+      ))}
+    </div>
+  )
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -89,6 +128,10 @@ export const MessageBubble = memo(function MessageBubble({
   isStreaming,
   streamContent,
   streamReasoning,
+  streamToolCalls,
+  toolResults,
+  approvals,
+  approvalCallId,
   canAct,
   onRegenerate,
   onEdit,
@@ -123,6 +166,14 @@ export const MessageBubble = memo(function MessageBubble({
   }
 
   const padding = density === 'compact' ? 'px-3 py-2' : 'px-4 py-3'
+
+  // Tool calls live in `stream.toolCalls` while the block is streaming, and on
+  // the message itself once the block has been sealed.
+  const calls = isStreaming ? (streamToolCalls ?? []) : (message.toolCalls ?? [])
+
+  // An assistant block that only asked for tools shows the cards on their own,
+  // without an empty bubble above them.
+  const showBubble = !(calls.length > 0 && content.length === 0 && !isUser)
 
   const actions = (
     <div
@@ -215,13 +266,19 @@ export const MessageBubble = memo(function MessageBubble({
             <ReasoningPanel text={reasoning} defaultOpen={false} />
           ) : null}
           <Attachments attachments={message.attachments} />
-          {isStreaming && !content && reasoning.length === 0 ? (
+          {isStreaming && !content && reasoning.length === 0 && calls.length === 0 ? (
             <TypingDots />
           ) : isUser ? (
             <div className="text-sm leading-relaxed whitespace-pre-wrap text-fg">{content}</div>
-          ) : (
+          ) : content.length > 0 || calls.length === 0 ? (
             <MarkdownView content={content} />
-          )}
+          ) : null}
+          <ToolCalls
+            calls={calls}
+            toolResults={toolResults}
+            approvals={approvals}
+            approvalCallId={approvalCallId}
+          />
           <MessageFooter message={message} isStreaming={isStreaming} />
         </div>
       </div>
@@ -241,7 +298,7 @@ export const MessageBubble = memo(function MessageBubble({
 
         <Attachments attachments={message.attachments} />
 
-        {content.length > 0 || !isStreaming ? (
+        {showBubble ? (
           <div
             className={cn(
               'rounded-[14px] border text-sm leading-relaxed',
@@ -259,11 +316,14 @@ export const MessageBubble = memo(function MessageBubble({
               <MarkdownView content={content} />
             )}
           </div>
-        ) : (
-          <div className={cn('rounded-[14px] border border-border bg-[var(--color-bubble)]', padding)}>
-            <TypingDots />
-          </div>
-        )}
+        ) : null}
+
+        <ToolCalls
+          calls={calls}
+          toolResults={toolResults}
+          approvals={approvals}
+          approvalCallId={approvalCallId}
+        />
       </div>
 
       <div className={cn('flex items-center gap-2', isUser ? 'flex-row-reverse' : '')}>

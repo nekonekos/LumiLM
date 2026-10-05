@@ -14,6 +14,9 @@ import {
 import { formatNumber } from '@/lib/format'
 import { ModelManager } from '@/components/models/ModelManager'
 import { RuntimePanel } from '@/components/inspector/RuntimePanel'
+import { AgentTab } from '@/components/settings/AgentTab'
+import { McpTab } from '@/components/settings/McpTab'
+import { SkillsTab } from '@/components/settings/SkillsTab'
 import { useAppIcon } from '@/hooks/useAppIcon'
 import { useT } from '@/i18n'
 import { useModelsStore } from '@/stores/models'
@@ -77,6 +80,9 @@ export function SettingsDialog(): ReactNode {
               { value: 'appearance', label: t('settings.appearance') },
               { value: 'inference', label: t('settings.inference') },
               { value: 'models', label: t('settings.models') },
+              { value: 'agent', label: t('settings.agent') },
+              { value: 'mcp', label: t('settings.mcp') },
+              { value: 'skills', label: t('settings.skills') },
               { value: 'advanced', label: t('settings.advanced') },
               { value: 'about', label: t('settings.about') }
             ]}
@@ -240,6 +246,9 @@ export function SettingsDialog(): ReactNode {
 
           {tab === 'inference' ? <RuntimePanel /> : null}
           {tab === 'models' ? <ModelManager /> : null}
+          {tab === 'agent' ? <AgentTab /> : null}
+          {tab === 'mcp' ? <McpTab /> : null}
+          {tab === 'skills' ? <SkillsTab /> : null}
 
           {tab === 'advanced' ? (
             <div className="flex flex-col gap-5">

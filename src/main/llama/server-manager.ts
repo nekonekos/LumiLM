@@ -46,6 +46,7 @@ export function createInitialState(): ServerState {
     progress: null,
     degradedRetries: 0,
     commandLine: null,
+    supportsTools: null,
     metrics: null
   }
 }
@@ -78,6 +79,18 @@ function extractContextSize(props: Record<string, unknown> | null): number | nul
     if (typeof nCtx === 'number' && nCtx > 0) return nCtx
   }
   return null
+}
+
+/**
+ * llama.cpp can only turn a tool call into the native `tool_calls` channel when
+ * the model's chat template handles tools. The template is reported by /props,
+ * so it doubles as a cheap capability probe. `null` means "unknown".
+ */
+export function extractToolSupport(props: Record<string, unknown> | null): boolean | null {
+  if (!props) return null
+  const template = props.chat_template
+  if (typeof template !== 'string' || template.length === 0) return null
+  return /tool_call|tool_calls|function_call|[^a-z]tools[^a-z]/i.test(template)
 }
 
 interface StartConfig {
@@ -429,7 +442,8 @@ class ServerManager extends EventEmitter {
             contextSize: reportedCtx ?? attempt.recommendation.contextSize,
             gpuLayers: attempt.recommendation.gpuLayers,
             totalLayers: attempt.recommendation.totalLayers,
-            kvCacheType: attempt.recommendation.kvCacheType
+            kvCacheType: attempt.recommendation.kvCacheType,
+            supportsTools: extractToolSupport(props)
           })
 
           modelLibrary.markUsed(config.model.id)

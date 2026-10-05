@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  AgentNoticeCode,
   Attachment,
   ChatMessage,
   ChatRequest,
@@ -8,10 +9,12 @@ import type {
   Conversation,
   ConversationMeta,
   MessageStats,
-  ServerState
+  ServerState,
+  ToolCall
 } from '@shared/types'
 import { createInitialServerState } from '@/lib/server-state'
 import { translate, type MessageKey } from '@/i18n'
+import { useAgentStore } from './agent'
 import { useModelsStore } from './models'
 import { useSettingsStore } from './settings'
 import { useUiStore } from './ui'
@@ -21,6 +24,10 @@ export interface StreamState {
   messageId: string
   content: string
   reasoning: string
+  /** tool calls requested by the current assistant block */
+  toolCalls: ToolCall[]
+  /** agent iteration index, 0 for a plain chat turn */
+  iteration: number
   startedAt: number
   ttftMs: number | null
 }
@@ -61,6 +68,14 @@ const ERROR_CODES: MessageKey[] = [
   'error.SERVER_BUSY',
   'error.SERVER_NOT_READY'
 ]
+
+/** Non-fatal agent conditions that are surfaced as toasts. */
+const NOTICE_KEYS: Record<AgentNoticeCode, MessageKey> = {
+  MAX_ITERATIONS: 'agent.noticeMaxIterations',
+  CONTEXT_EXHAUSTED: 'agent.noticeContextExhausted',
+  CONTEXT_TRIMMED: 'agent.noticeContextTrimmed',
+  TOOLS_UNSUPPORTED: 'agent.noticeToolsUnsupported'
+}
 
 function translateErrorCode(locale: 'zh-CN' | 'en-US', message: string): string {
   const key = ERROR_CODES.find((candidate) => candidate.slice('error.'.length) === message)
@@ -114,7 +129,13 @@ function buildRequestMessages(
   conversation: Conversation,
   contextSize: number | null
 ): { messages: ChatRequestMessage[]; trimmed: number; imageCount: number } {
-  const { kept, trimmed } = trimMessages(conversation.messages, conversation.systemPrompt, contextSize)
+  // The agent path hands the whole history to the main process, which owns the
+  // real budget (it knows the prompt and tool schema cost) and is the only side
+  // that can trim tool-call rounds without breaking their pairing.
+  const isAgent = conversation.mode === 'agent'
+  const { kept, trimmed } = isAgent
+    ? { kept: conversation.messages, trimmed: 0 }
+    : trimMessages(conversation.messages, conversation.systemPrompt, contextSize)
   let imageCount = 0
 
   const messages: ChatRequestMessage[] = kept
@@ -127,7 +148,11 @@ function buildRequestMessages(
       return {
         role: message.role,
         content: message.content,
-        ...(images.length > 0 ? { images } : {})
+        ...(images.length > 0 ? { images } : {}),
+        ...(message.toolCalls && message.toolCalls.length > 0
+          ? { toolCalls: message.toolCalls }
+          : {}),
+        ...(message.toolCallId ? { toolCallId: message.toolCallId } : {})
       }
     })
 
@@ -213,6 +238,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             ...message,
             content: stream.content,
             reasoning: stream.reasoning.length > 0 ? stream.reasoning : undefined,
+            toolCalls: stream.toolCalls.length > 0 ? stream.toolCalls : undefined,
             stats,
             stopped: stopped || undefined,
             error: errorMessage ?? null,
@@ -259,6 +285,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         messageId: assistantId,
         content: '',
         reasoning: '',
+        toolCalls: [],
+        iteration: 0,
         startedAt: Date.now(),
         ttftMs: null
       }
@@ -270,7 +298,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       modelId: conversation.modelId,
       systemPrompt: conversation.systemPrompt,
       messages,
-      sampling: conversation.sampling
+      sampling: conversation.sampling,
+      mode: conversation.mode,
+      agent: conversation.agent
     }
 
     try {
@@ -503,6 +533,102 @@ export const useChatStore = create<ChatState>((set, get) => {
             set({ stream: { ...stream, ttftMs: event.metrics.ttftMs } })
           }
           break
+
+        case 'iteration': {
+          // Iteration 0 continues the placeholder the caller already created.
+          if (event.index === 0) break
+          flush()
+          const conversation = get().conversation
+          const current = get().stream
+          if (!conversation || !current) break
+
+          const sealed = conversation.messages.map((message) =>
+            message.id === current.messageId
+              ? {
+                  ...message,
+                  content: current.content,
+                  reasoning: current.reasoning.length > 0 ? current.reasoning : undefined,
+                  toolCalls: current.toolCalls.length > 0 ? current.toolCalls : undefined,
+                  updatedAt: Date.now()
+                }
+              : message
+          )
+
+          const nextAssistant: ChatMessage = {
+            id: nextId('assistant'),
+            role: 'assistant',
+            content: '',
+            createdAt: Date.now(),
+            modelId: conversation.modelId ?? undefined
+          }
+          const next: Conversation = { ...conversation, messages: [...sealed, nextAssistant] }
+
+          resetPending()
+          set({
+            conversation: next,
+            stream: {
+              ...current,
+              messageId: nextAssistant.id,
+              content: '',
+              reasoning: '',
+              toolCalls: [],
+              iteration: event.index
+            }
+          })
+          void persist(next)
+          break
+        }
+
+        case 'tool-call': {
+          const current = get().stream
+          if (!current) break
+          set({ stream: { ...current, toolCalls: [...current.toolCalls, event.call] } })
+          break
+        }
+
+        case 'tool-result': {
+          const conversation = get().conversation
+          if (!conversation) break
+          const toolMessage: ChatMessage = {
+            id: nextId('tool'),
+            role: 'tool',
+            content: event.result.content,
+            toolCallId: event.callId,
+            createdAt: Date.now(),
+            toolResult: event.result
+          }
+          const next: Conversation = {
+            ...conversation,
+            messages: [...conversation.messages, toolMessage]
+          }
+          // The tool message must be part of the assistant block already in the
+          // store, so the pairing survives a reload mid-turn.
+          set({ conversation: next })
+          void persist(next)
+          break
+        }
+
+        case 'approval-request':
+          useAgentStore.getState().requestApproval({
+            callId: event.call.id,
+            call: event.call,
+            risk: event.risk,
+            reason: event.reason
+          })
+          break
+
+        case 'approval-resolved':
+          useAgentStore.getState().resolveApproval(event.callId, event.decision)
+          break
+
+        case 'notice': {
+          const locale = useSettingsStore.getState().settings?.general.locale ?? 'zh-CN'
+          useUiStore.getState().pushToast({
+            kind: event.code === 'CONTEXT_EXHAUSTED' ? 'warning' : 'info',
+            message: translate(locale, NOTICE_KEYS[event.code])
+          })
+          break
+        }
 
         case 'done':
           void finalize(event.stats, false)

@@ -52,6 +52,19 @@ function sortMetas(metas: ConversationMeta[]): ConversationMeta[] {
   })
 }
 
+/**
+ * Conversations written before the extension system existed have no `mode` or
+ * `agent` field. Filling them in here keeps the rest of the code free of
+ * optional chaining and guarantees that old files open in plain chat mode.
+ */
+export function normalizeConversation(conversation: Conversation): Conversation {
+  return {
+    ...conversation,
+    mode: conversation.mode === 'agent' ? 'agent' : 'chat',
+    agent: conversation.agent && typeof conversation.agent === 'object' ? conversation.agent : {}
+  }
+}
+
 class ConversationStore {
   private index: ConversationMeta[] | null = null
 
@@ -71,7 +84,7 @@ class ConversationStore {
       if (!entry.endsWith('.json') || entry.startsWith('.')) continue
       const parsed = readJsonSync<Conversation>(join(dir, entry))
       if (parsed && typeof parsed.id === 'string' && Array.isArray(parsed.messages)) {
-        conversations.push(parsed)
+        conversations.push(normalizeConversation(parsed))
       }
     }
     return conversations
@@ -98,7 +111,8 @@ class ConversationStore {
   }
 
   get(id: string): Conversation | null {
-    return readJsonSync<Conversation>(this.fileFor(id))
+    const parsed = readJsonSync<Conversation>(this.fileFor(id))
+    return parsed ? normalizeConversation(parsed) : null
   }
 
   create(init?: { modelId?: string | null; title?: string; sampling?: SamplingParams }): Conversation {
@@ -113,6 +127,8 @@ class ConversationStore {
       modelId: init?.modelId ?? null,
       systemPrompt: '',
       sampling: init?.sampling ? { ...DEFAULT_SAMPLING, ...init.sampling } : { ...DEFAULT_SAMPLING },
+      mode: 'chat',
+      agent: {},
       messages: []
     }
     this.write(conversation)
