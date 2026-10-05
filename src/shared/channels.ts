@@ -65,6 +65,9 @@ export const CH = {
     approve: 'memory:approve',
     episodes: 'memory:episodes',
     forgetAll: 'memory:forget-all',
+    restore: 'memory:restore',
+    sweep: 'memory:sweep',
+    sweepApply: 'memory:sweep-apply',
     export: 'memory:export',
     import: 'memory:import'
   },

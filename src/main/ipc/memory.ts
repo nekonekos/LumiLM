@@ -9,6 +9,7 @@ import type {
   MemoryHit,
   MemoryQuery,
   MemoryStats,
+  MemorySweepReport,
   PersonaCard
 } from '@shared/types'
 import { memoryManager } from '../memory/manager'
@@ -88,6 +89,21 @@ export function registerMemoryHandlers(): void {
   registerHandler(CH.memory.approve, (_event, ids: string[], accept: boolean): MemoryFact[] => {
     const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
     const next = memoryManager.approve(list, accept !== false)
+    announce()
+    return next
+  })
+
+  registerHandler(CH.memory.restore, (_event, id: string): MemoryFact[] => {
+    const next = typeof id === 'string' ? memoryManager.restoreFact(id) : memoryManager.listFacts({ includeArchived: true })
+    announce()
+    return next
+  })
+
+  registerHandler(CH.memory.sweep, (): Promise<MemorySweepReport> => companionService.sweep())
+
+  registerHandler(CH.memory.sweepApply, (_event, ids: string[]): MemoryFact[] => {
+    const accepted = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
+    const next = companionService.applySweep(accepted)
     announce()
     return next
   })

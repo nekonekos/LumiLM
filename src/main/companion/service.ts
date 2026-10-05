@@ -5,7 +5,10 @@ import type {
   CompanionStatus,
   Conversation,
   HeartbeatEvent,
+  MemoryFact,
   MemoryHit,
+  MemorySweepProposal,
+  MemorySweepReport,
   PersonaCard,
   PromptBlockInfo,
   PromptPreviewInput,
@@ -22,16 +25,56 @@ import {
   composeCompanionPrompt,
   type ComposedCompanionPrompt
 } from '../agent/prompt'
-import { memoryManager } from '../memory/manager'
+import { memoryManager, type MemoryDraft, type MemoryVerdict } from '../memory/manager'
+import {
+  MAX_CANDIDATES,
+  MAX_PROTECTED_CANDIDATES,
+  consolidateFacts,
+  type ConsolidationCandidate,
+  type ConsolidationClient
+} from '../memory/consolidate'
 import {
   ExtractionQueue,
   buildRollingSummary,
   extractFacts,
   extractRelationship,
+  noiseReason,
   type ExtractOptions,
   type ExtractionJob
 } from '../memory/extract'
+import { textSimilarity } from '../memory/lexical-index'
 import { listCards, resolveCard } from './persona'
+
+/**
+ * Rows offered to the consolidation pass per draft, and in total.
+ *
+ * Both are load-bearing: `MAX_PER_DRAFT_CANDIDATES` bounds how far down one draft's
+ * ranking the pass will look, and the total bounds the prompt, which is otherwise
+ * the only thing here that could grow with the size of the store.
+ */
+const MAX_PER_DRAFT_CANDIDATES = MAX_CANDIDATES + MAX_PROTECTED_CANDIDATES
+const MAX_TOTAL_CANDIDATES = 24
+
+/** Facts the tidy-up compares in one consolidation call, and per call batch. */
+const SWEEP_BATCH = 6
+/** Similarity above which the offline check calls two stored rows the same fact. */
+const SWEEP_SIMILARITY = 0.85
+
+/**
+ * Which of two duplicate rows survives.
+ *
+ * Deterministic, and deliberately boring: whatever the user has actually been shown
+ * wins, because that is the row the companion's replies have been built on. Then
+ * importance, then age, so the outcome never depends on array order.
+ */
+function pickSurvivor(a: MemoryFact, b: MemoryFact): [MemoryFact, MemoryFact] {
+  const weight = (fact: MemoryFact): number =>
+    fact.useCount * 1000 + fact.importance * 10 + Math.min(fact.reinforcements, 9)
+  const left = weight(a)
+  const right = weight(b)
+  if (left !== right) return left > right ? [a, b] : [b, a]
+  return a.createdAt <= b.createdAt ? [a, b] : [b, a]
+}
 
 /**
  * Everything the companion needs that is not a transport concern.
@@ -104,6 +147,13 @@ class CompanionService {
   private queue: ExtractionQueue | null = null
   private lastInjection = ''
   private lastBlocks: PromptBlockInfo[] = []
+  /**
+   * The suggestions the last tidy-up produced.
+   *
+   * Kept here so `applySweep` can resolve what to do from the report the user was
+   * actually looking at, instead of trusting anything sent back across the bridge.
+   */
+  private lastSweep: MemorySweepReport | null = null
 
   /** The extraction queue, created on first use. */
   private extractionQueue(): ExtractionQueue {
@@ -148,6 +198,132 @@ class CompanionService {
 
   updateRelationship(patch: Partial<RelationshipState>): RelationshipState {
     return memoryManager.updateRelationship(patch)
+  }
+
+  /**
+   * The memory tidy-up: reads what is already stored and *proposes* changes.
+   *
+   * Nothing is written here. The store that motivated this held six rows of which
+   * five were noise, and a filter that only guards new writes would leave every
+   * existing install full of them — but rewriting someone's memories behind their
+   * back is worse than the noise. So this returns a report and the user decides.
+   *
+   * Three checks run, cheapest first: the noise filters that were tightened, then
+   * verbatim duplicates (which need no model at all), then the consolidation pass on
+   * what is left. The offline half is what makes the button useful even when the
+   * model is not loaded.
+   */
+  async sweep(): Promise<MemorySweepReport> {
+    const facts = memoryManager.listFacts({})
+    const proposals: MemorySweepProposal[] = []
+    const claimed = new Set<string>()
+
+    for (const fact of facts) {
+      const reason = noiseReason(fact.text)
+      if (!reason) continue
+      claimed.add(fact.id)
+      proposals.push({
+        op: 'drop',
+        id: fact.id,
+        targetId: null,
+        reason,
+        text: fact.text,
+        targetText: null
+      })
+    }
+
+    for (const fact of facts) {
+      if (claimed.has(fact.id)) continue
+      const near = facts.find(
+        (other) =>
+          other.id !== fact.id &&
+          !claimed.has(other.id) &&
+          textSimilarity(other.text, fact.text) >= SWEEP_SIMILARITY
+      )
+      if (!near) continue
+      const [keep, lose] = pickSurvivor(fact, near)
+      claimed.add(keep.id)
+      claimed.add(lose.id)
+      proposals.push({
+        op: 'merge',
+        id: lose.id,
+        targetId: keep.id,
+        reason: 'duplicate',
+        text: lose.text,
+        targetText: keep.text
+      })
+    }
+
+    const client = serverManager.getClient()
+    const remaining = facts.filter((fact) => !claimed.has(fact.id))
+    const usedModel = Boolean(client && serverManager.isReady() && remaining.length > 1)
+    if (client && serverManager.isReady()) {
+      for (let start = 0; start < remaining.length; start += SWEEP_BATCH) {
+        const batch = remaining.slice(start, start + SWEEP_BATCH)
+        const verdicts = await this.verdictsFor(
+          client,
+          batch.map((fact) => ({
+            text: fact.text,
+            kind: fact.kind,
+            subject: fact.subject,
+            importance: fact.importance,
+            confidence: fact.confidence
+          })),
+          Date.now(),
+          batch.map((fact) => fact.id)
+        )
+
+        batch.forEach((fact, index) => {
+          const verdict = verdicts[index]
+          if (verdict.op !== 'same' || !verdict.targetId) return
+          const target = facts.find((entry) => entry.id === verdict.targetId)
+          if (!target || claimed.has(fact.id) || claimed.has(target.id)) return
+          const [keep, lose] = pickSurvivor(fact, target)
+          claimed.add(keep.id)
+          claimed.add(lose.id)
+          proposals.push({
+            op: 'merge',
+            id: lose.id,
+            targetId: keep.id,
+            reason: 'modelDuplicate',
+            text: lose.text,
+            targetText: keep.text
+          })
+        })
+      }
+    }
+
+    logger.info(
+      'memory',
+      `tidy-up scanned ${facts.length} row(s) and suggested ${proposals.length} change(s)`
+    )
+    this.lastSweep = { scanned: facts.length, proposals, usedModel }
+    return this.lastSweep
+  }
+
+  /**
+   * Applies the suggestions the user accepted.
+   *
+   * Resolved against `lastSweep` rather than against anything the renderer sends
+   * back: the renderer only ever chooses *which* suggestions to accept, never what
+   * they do.
+   */
+  applySweep(ids: string[]): MemoryFact[] {
+    const accepted = new Set(ids)
+    const report = this.lastSweep
+    let facts: MemoryFact[] = memoryManager.listFacts({ includeArchived: true })
+    if (!report) return facts
+
+    for (const proposal of report.proposals) {
+      if (!accepted.has(proposal.id)) continue
+      facts =
+        proposal.op === 'merge' && proposal.targetId
+          ? memoryManager.mergeFacts(proposal.id, proposal.targetId, proposal.reason)
+          : memoryManager.archiveFact(proposal.id, proposal.reason)
+    }
+
+    this.lastSweep = null
+    return facts
   }
 
   /**
@@ -315,7 +491,9 @@ class CompanionService {
       systemPrompt: plan.request.systemPrompt,
       nKeep: plan.composed.personaTokens
     }
-    this.extractionQueue().schedule({ conversationId, options })
+    // The turn's own timestamp travels with the job: the timeline is stamped with
+    // when the user said it, not with when the background pass got around to it.
+    this.extractionQueue().schedule({ conversationId, options, at: Date.now() })
   }
 
   /** Called when the user sends, so a background job never blocks the reply. */
@@ -342,15 +520,18 @@ class CompanionService {
     const conversationId = job.conversationId
     const options = job.options
     const settings = settingsStore.get().companion
+    const at = job.at ?? Date.now()
     const result = await extractFacts(client, options)
 
     if (result.drafts.length > 0) {
-      memoryManager.remember(result.drafts, { conversationId, messageIds: [] }, settings)
+      const context = { conversationId, messageIds: [] }
+      const verdicts = await this.verdictsFor(client, result.drafts, at)
+      const stored = memoryManager.applyVerdicts(verdicts, context, settings)
       logger.info(
         'memory',
         `learned ${result.drafts.length} fact(s) in ${Math.round(
           result.timings.durationMs ?? 0
-        )}ms (prompt ${result.timings.promptTokens ?? '?'} tok)`
+        )}ms (prompt ${result.timings.promptTokens ?? '?'} tok) -> ${stored.length} row(s)`
       )
     } else {
       // An extraction that finds nothing is normal, but an extraction that
@@ -371,6 +552,68 @@ class CompanionService {
     })
 
     memoryManager.touchInteraction()
+  }
+
+  /**
+   * Turns drafts into decisions, with the silent consolidation pass.
+   *
+   * The candidate pool is assembled round-robin across the drafts rather than by
+   * filling one draft's shortlist first, so a turn that produced six candidates
+   * cannot crowd out a later draft's only match. The pool is capped: the prompt
+   * this pass builds must stay a fixed size no matter how large the store or the
+   * turn grows.
+   *
+   * Failure is never fatal. A model that is gone, or an answer that does not parse,
+   * leaves every draft as a plain insert and the lexical backstop takes over —
+   * exactly the behaviour the app had before this pass existed.
+   */
+  private async verdictsFor(
+    client: ConsolidationClient,
+    drafts: MemoryDraft[],
+    at: number,
+    /** rows the drafts already *are*, so a stored row is not offered itself */
+    selfIds?: readonly string[]
+  ): Promise<MemoryVerdict[]> {
+    const asNew = (): MemoryVerdict[] =>
+      drafts.map((draft) => ({ draft, op: 'new' as const, targetId: null, why: '', at }))
+
+    const empty: ReadonlySet<string> = new Set()
+    const perDraft = drafts.map((draft, index) => {
+      const self = selfIds?.[index]
+      const exclude = self ? new Set([self]) : empty
+      return memoryManager
+        .shortlistExcluding(draft.text, MAX_CANDIDATES, exclude)
+        .slice(0, MAX_PER_DRAFT_CANDIDATES)
+    })
+
+    const candidates: ConsolidationCandidate[] = []
+    const seen = new Set<string>()
+    const deepest = Math.max(0, ...perDraft.map((list) => list.length))
+    for (let level = 0; level < deepest && candidates.length < MAX_TOTAL_CANDIDATES; level += 1) {
+      for (const list of perDraft) {
+        const fact = list[level]
+        if (!fact || seen.has(fact.id)) continue
+        if (candidates.length >= MAX_TOTAL_CANDIDATES) break
+        seen.add(fact.id)
+        candidates.push({
+          id: fact.id,
+          text: fact.text,
+          kind: fact.kind,
+          lastAt: fact.occurrences[0]?.at ?? null
+        })
+      }
+    }
+
+    if (candidates.length === 0) return asNew()
+
+    try {
+      const result = await consolidateFacts(client, drafts, candidates)
+      if (!result) return asNew()
+      return drafts.map((draft, index) => ({ draft, ...result.decisions[index], at }))
+    } catch (error) {
+      logger.warn('memory', `consolidation failed, storing as new: ${toError(error).message}`)
+      return asNew()
+    }
   }
 
   /**

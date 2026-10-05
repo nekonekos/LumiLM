@@ -3,6 +3,8 @@ import type {
   HeartbeatBookkeeping,
   MemoryEpisode,
   MemoryFact,
+  MemoryOccurrence,
+  MemoryProvenance,
   MemorySnapshot,
   RelationshipState,
   SeedThought,
@@ -11,6 +13,8 @@ import type {
 import {
   DEFAULT_HEARTBEAT,
   DEFAULT_RELATIONSHIP,
+  MAX_FACT_OCCURRENCES,
+  MAX_FACT_PROVENANCE,
   MEMORY_STORE_VERSION,
   MAX_MEMORY_EPISODES,
   MAX_MEMORY_FACTS,
@@ -104,6 +108,10 @@ export function normalizeFact(raw: unknown): MemoryFact | null {
     lastUsedAt: asNumber(raw.lastUsedAt, 0),
     useCount: asNumber(raw.useCount, 0),
     reinforcements: asNumber(raw.reinforcements, 0),
+    occurrences: normalizeOccurrences(raw.occurrences),
+    supersededBy: typeof raw.supersededBy === 'string' ? raw.supersededBy : null,
+    mergedFrom: asStringArray(raw.mergedFrom),
+    provenance: normalizeProvenance(raw.provenance),
     sourceConversationId:
       typeof raw.sourceConversationId === 'string' ? raw.sourceConversationId : null,
     sourceMessageIds: asStringArray(raw.sourceMessageIds),
@@ -113,6 +121,43 @@ export function normalizeFact(raw: unknown): MemoryFact | null {
     pending: asBool(raw.pending),
     embedding: null
   }
+}
+
+/** Newest first, capped, and dropping anything without a usable date. */
+function normalizeOccurrences(raw: unknown): MemoryOccurrence[] {
+  if (!Array.isArray(raw)) return []
+  const out: MemoryOccurrence[] = []
+  for (const entry of raw) {
+    if (!isPlainObject(entry)) continue
+    const dateKey = asString(entry.dateKey)
+    const at = asNumber(entry.at, 0)
+    if (dateKey.length === 0 || at <= 0) continue
+    out.push({
+      at,
+      dateKey,
+      note: asString(entry.note),
+      conversationId: typeof entry.conversationId === 'string' ? entry.conversationId : null
+    })
+  }
+  out.sort((a, b) => b.at - a.at)
+  return out.slice(0, MAX_FACT_OCCURRENCES)
+}
+
+function normalizeProvenance(raw: unknown): MemoryProvenance[] {
+  if (!Array.isArray(raw)) return []
+  const out: MemoryProvenance[] = []
+  for (const entry of raw) {
+    if (!isPlainObject(entry)) continue
+    const op = asString(entry.op)
+    if (op.length === 0) continue
+    out.push({
+      op,
+      of: typeof entry.of === 'string' ? entry.of : null,
+      at: asNumber(entry.at, 0),
+      why: asString(entry.why).slice(0, 200)
+    })
+  }
+  return out.slice(-MAX_FACT_PROVENANCE)
 }
 
 function normalizeEpisode(raw: unknown): MemoryEpisode | null {

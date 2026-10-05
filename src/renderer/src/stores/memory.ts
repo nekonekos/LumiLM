@@ -1,5 +1,12 @@
 import { create } from 'zustand'
-import type { MemoryEpisode, MemoryFact, MemoryHit, MemoryQuery, MemoryStats } from '@shared/types'
+import type {
+  MemoryEpisode,
+  MemoryFact,
+  MemoryHit,
+  MemoryQuery,
+  MemoryStats,
+  MemorySweepReport
+} from '@shared/types'
 import { useUiStore } from './ui'
 
 interface MemoryState {
@@ -14,6 +21,9 @@ interface MemoryState {
   query: MemoryQuery
   selectedId: string | null
   loading: boolean
+  /** the tidy-up's suggestions, held until the user accepts or dismisses them */
+  sweep: MemorySweepReport | null
+  sweeping: boolean
 
   load: () => Promise<void>
   refreshStats: () => Promise<void>
@@ -23,6 +33,10 @@ interface MemoryState {
   remove: (id: string) => Promise<void>
   removeMany: (ids: string[]) => Promise<void>
   approve: (ids: string[], accept: boolean) => Promise<void>
+  restore: (id: string) => Promise<void>
+  runSweep: () => Promise<void>
+  applySweep: (ids: string[]) => Promise<void>
+  dismissSweep: () => void
   forgetAll: () => Promise<void>
   exportToFile: () => Promise<void>
   importFromFile: () => Promise<void>
@@ -46,6 +60,8 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
   query: { includeArchived: false, includePending: true, sort: 'recent' },
   selectedId: null,
   loading: false,
+  sweep: null,
+  sweeping: false,
 
   load: async () => {
     set({ loading: true })
@@ -91,6 +107,32 @@ export const useMemoryStore = create<MemoryState>((set, get) => ({
     set({ facts: await window.lumilm.memory.approve(ids, accept) })
   },
 
+  restore: async (id) => {
+    set({ facts: await window.lumilm.memory.restore(id) })
+    await get().refreshStats()
+  },
+
+  runSweep: async () => {
+    set({ sweeping: true })
+    try {
+      set({ sweep: await window.lumilm.memory.sweep() })
+    } finally {
+      set({ sweeping: false })
+    }
+  },
+
+  applySweep: async (ids) => {
+    set({ sweeping: true })
+    try {
+      set({ facts: await window.lumilm.memory.sweepApply(ids), sweep: null })
+      await get().refreshStats()
+    } finally {
+      set({ sweeping: false })
+    }
+  },
+
+  dismissSweep: () => set({ sweep: null }),
+
   forgetAll: async () => {
     await window.lumilm.memory.forgetAll()
     set({ facts: [], episodes: [], preview: [], selectedId: null })
@@ -124,6 +166,7 @@ export function visibleFacts(facts: MemoryFact[], query: MemoryQuery): MemoryFac
     if (!query.includeArchived && fact.archived) return false
     if (query.includePending === false && fact.pending) return false
     if (query.pinnedOnly && !fact.pinned) return false
+    if (query.repeatedOnly && fact.occurrences.length < 2) return false
     if (query.minImportance !== undefined && fact.importance < query.minImportance) return false
     if (query.kinds && query.kinds.length > 0 && !query.kinds.includes(fact.kind)) return false
     if (query.subject && query.subject !== 'all' && fact.subject !== query.subject) return false

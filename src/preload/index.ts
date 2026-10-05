@@ -27,6 +27,7 @@ import type {
   MemoryHit,
   MemoryQuery,
   MemoryStats,
+  MemorySweepReport,
   ModelInfo,
   ModelSuggestion,
   PerfPreset,
@@ -179,6 +180,10 @@ const api: LumiLMApi = {
     approve: (ids: string[], accept: boolean) =>
       ipcRenderer.invoke(CH.memory.approve, ids, accept) as Promise<MemoryFact[]>,
     episodes: () => ipcRenderer.invoke(CH.memory.episodes) as Promise<MemoryEpisode[]>,
+    restore: (id: string) => ipcRenderer.invoke(CH.memory.restore, id) as Promise<MemoryFact[]>,
+    sweep: () => ipcRenderer.invoke(CH.memory.sweep) as Promise<MemorySweepReport>,
+    sweepApply: (ids: string[]) =>
+      ipcRenderer.invoke(CH.memory.sweepApply, ids) as Promise<MemoryFact[]>,
     forgetAll: () => ipcRenderer.invoke(CH.memory.forgetAll) as Promise<void>,
     exportToFile: () => ipcRenderer.invoke(CH.memory.export) as Promise<string | null>,
     importFromFile: () => ipcRenderer.invoke(CH.memory.import) as Promise<MemoryFact[] | null>

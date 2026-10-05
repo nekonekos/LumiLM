@@ -89,7 +89,13 @@ function FactRow({
           {t(KIND_LABEL[fact.kind])}
         </Badge>
         <Stars value={fact.importance} />
+        {fact.occurrences.length > 1 ? (
+          <span className="text-brand">
+            ×{fact.occurrences.length} · {fact.occurrences[0].dateKey.slice(5)}
+          </span>
+        ) : null}
         {fact.useCount > 0 ? <span>{t('memory.useCount', { n: fact.useCount })}</span> : null}
+        {fact.supersededBy ? <Badge tone="warning">{t('memory.superseded')}</Badge> : null}
         {fact.pending ? <Badge tone="brand">{t('memory.pending')}</Badge> : null}
         {fresh && !fact.pending ? <Badge tone="success">{t('memory.newBadge')}</Badge> : null}
         {fact.suppressed ? <EyeOff className="size-2.5" /> : null}
@@ -103,6 +109,7 @@ function FactDetail({ fact }: { fact: MemoryFact }): ReactNode {
   const locale = useLocale()
   const update = useMemoryStore((state) => state.update)
   const remove = useMemoryStore((state) => state.remove)
+  const restore = useMemoryStore((state) => state.restore)
   const openConversation = useChatStore((state) => state.open)
   const setMemoryOpen = useUiStore((state) => state.setMemoryOpen)
 
@@ -122,6 +129,10 @@ function FactDetail({ fact }: { fact: MemoryFact }): ReactNode {
           {t(KIND_LABEL[fact.kind])}
         </Badge>
         <Badge tone="neutral">{fact.subject}</Badge>
+        {fact.occurrences.length > 1 ? (
+          <Badge tone="brand">{t('memory.occurrences', { n: fact.occurrences.length })}</Badge>
+        ) : null}
+        {fact.supersededBy ? <Badge tone="warning">{t('memory.superseded')}</Badge> : null}
         {fact.pending ? <Badge tone="brand">{t('memory.pending')}</Badge> : null}
         {fact.archived ? <Badge tone="danger">{t('memory.archive')}</Badge> : null}
         <span className="ml-auto text-[10px] text-fg-subtle">
@@ -203,7 +214,42 @@ function FactDetail({ fact }: { fact: MemoryFact }): ReactNode {
           <span>{t('memory.reinforced', { n: fact.reinforcements })}</span>
         ) : null}
         <span>{t('memory.useCount', { n: fact.useCount })}</span>
+        {fact.mergedFrom.length > 0 ? (
+          <span>{t('memory.mergedFrom', { n: fact.mergedFrom.length })}</span>
+        ) : null}
       </div>
+
+      {fact.occurrences.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          <SectionTitle>{t('memory.occurrenceTimeline')}</SectionTitle>
+          <p className="text-[11px] text-fg-subtle">{t('memory.occurrenceHint')}</p>
+          <ol className="flex flex-col gap-1">
+            {fact.occurrences.map((entry) => (
+              <li
+                key={`${entry.dateKey}-${entry.at}`}
+                className="flex items-start gap-2 rounded-[6px] border border-border bg-surface-2 px-2 py-1.5"
+              >
+                <span className="mt-px w-[38px] shrink-0 font-mono text-[10px] text-brand">
+                  {entry.dateKey.slice(5)}
+                </span>
+                <span className="flex-1 text-[11px] leading-snug text-fg-muted">{entry.note}</span>
+                <button
+                  type="button"
+                  title={t('common.delete')}
+                  className="mt-px text-fg-subtle transition-colors hover:text-danger"
+                  onClick={() =>
+                    void update(fact.id, {
+                      occurrences: fact.occurrences.filter((other) => other.at !== entry.at)
+                    })
+                  }
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-1.5">
         <SectionTitle>{t('memory.whyRemember')}</SectionTitle>
@@ -222,6 +268,12 @@ function FactDetail({ fact }: { fact: MemoryFact }): ReactNode {
           <Pencil className="size-3.5" />
           {t('memory.edit')}
         </Button>
+        {fact.supersededBy || fact.archived ? (
+          <Button size="sm" variant="ghost" onClick={() => void restore(fact.id)}>
+            <ArchiveRestore className="size-3.5" />
+            {t('memory.restore')}
+          </Button>
+        ) : null}
         <Button
           size="sm"
           variant="ghost"
@@ -307,6 +359,7 @@ export function FactList(): ReactNode {
         if (!query.includeArchived && fact.archived) return false
         if (query.includePending === false && fact.pending) return false
         if (query.pinnedOnly && !fact.pinned) return false
+        if (query.repeatedOnly && fact.occurrences.length < 2) return false
         if (kinds.length > 0 && !kinds.includes(fact.kind)) return false
         if (needle.length > 0 && !fact.text.toLowerCase().includes(needle)) return false
         return true
@@ -315,7 +368,15 @@ export function FactList(): ReactNode {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
         return b.updatedAt - a.updatedAt
       })
-  }, [facts, query.includeArchived, query.includePending, query.pinnedOnly, query.kinds, search])
+  }, [
+    facts,
+    query.includeArchived,
+    query.includePending,
+    query.pinnedOnly,
+    query.repeatedOnly,
+    query.kinds,
+    search
+  ])
 
   const selected = filtered.find((fact) => fact.id === selectedId) ?? null
 
@@ -347,6 +408,14 @@ export function FactList(): ReactNode {
             label={t('memory.pinnedOnly')}
           />
           {t('memory.pinnedOnly')}
+        </label>
+        <label className="flex items-center gap-2 text-[11px] text-fg-muted">
+          <Switch
+            checked={query.repeatedOnly ?? false}
+            onChange={(checked) => void setQuery({ repeatedOnly: checked })}
+            label={t('memory.repeatedOnly')}
+          />
+          {t('memory.repeatedOnly')}
         </label>
         <label className="flex items-center gap-2 text-[11px] text-fg-muted">
           <Switch

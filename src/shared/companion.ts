@@ -22,6 +22,30 @@ export type MemoryKind =
 
 export type MemorySubject = 'user' | 'assistant' | 'shared'
 
+/**
+ * One dated instance of a fact that happens more than once.
+ *
+ * Only objective events accumulate occurrences: 「加班到很晚」 on three different
+ * days is one habit with a history, not three unrelated rows. `note` keeps the
+ * wording used at the time so the drift stays visible in the memory library.
+ */
+export interface MemoryOccurrence {
+  at: number
+  /** YYYY-MM-DD, local time; the unit the same-day check works on */
+  dateKey: string
+  note: string
+  conversationId: string | null
+}
+
+/** One decision the consolidation pass made about a fact, shown in the library. */
+export interface MemoryProvenance {
+  op: string
+  /** the fact this decision was about, null for a plain insert */
+  of: string | null
+  at: number
+  why: string
+}
+
 /** One durable fact about the user, extracted from a finished turn. */
 export interface MemoryFact {
   id: string
@@ -39,6 +63,18 @@ export interface MemoryFact {
   useCount: number
   /** how many times the extractor re-learned this same fact */
   reinforcements: number
+  /** every dated instance, newest first; empty for one-off and non-event facts */
+  occurrences: MemoryOccurrence[]
+  /**
+   * The fact that replaced this one, when the user contradicted it later.
+   *
+   * The row is kept and merely archived, so the library can offer it back and
+   * nothing the companion once believed disappears without a trace.
+   */
+  supersededBy: string | null
+  /** ids of rows that were folded into this one, so a bad merge can be undone */
+  mergedFrom: string[]
+  provenance: MemoryProvenance[]
   sourceConversationId: string | null
   /** message ids the fact was derived from, for the "why do you remember this" jump */
   sourceMessageIds: string[]
@@ -264,13 +300,25 @@ export interface CompanionStatus {
 /* Defaults                                                            */
 /* ------------------------------------------------------------------ */
 
-export const MEMORY_STORE_VERSION = 1
+/**
+ * Snapshot schema version.
+ *
+ * 2 added `occurrences` / `supersededBy` / `mergedFrom` / `provenance` to every
+ * fact. There is no migration step: `normalizeFact` fills the missing fields
+ * with inert defaults, so a v1 file loads as a valid v2 one.
+ */
+export const MEMORY_STORE_VERSION = 2
 
 /** Hard cap on stored facts; the oldest and least important are evicted first. */
 export const MAX_MEMORY_FACTS = 2000
 export const MAX_MEMORY_EPISODES = 730
 export const MAX_SEED_THOUGHTS = 5
 export const SEED_THOUGHT_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+/** How many dated instances one fact keeps before the oldest are dropped. */
+export const MAX_FACT_OCCURRENCES = 50
+/** How many consolidation decisions a fact keeps for the library to explain. */
+export const MAX_FACT_PROVENANCE = 20
 
 /**
  * Context budget defaults, tuned for an 8 GB card at 8192 tokens.
@@ -520,6 +568,8 @@ export interface MemoryQuery {
   kinds?: MemoryKind[]
   subject?: MemorySubject | 'all'
   pinnedOnly?: boolean
+  /** only facts with more than one dated instance; the timeline lives behind this */
+  repeatedOnly?: boolean
   includeArchived?: boolean
   /** the review queue; when false pending facts are hidden */
   includePending?: boolean
@@ -537,6 +587,38 @@ export interface MemoryStats {
   /** size of the store on disk, for the "your memories take 12 KB" line */
   bytes: number
   lastDreamAt: number
+}
+
+/**
+ * One change the memory tidy-up suggests.
+ *
+ * Never applied on its own: the sweep proposes, the user accepts. Both kinds end
+ * in the same reversible state — the losing row is archived and points at whatever
+ * replaced it — so a wrong suggestion costs a click to undo and never silently
+ * deletes something the companion remembered.
+ */
+export interface MemorySweepProposal {
+  op: 'merge' | 'drop'
+  /** the row that would be archived */
+  id: string
+  /** the row that survives, for a merge */
+  targetId: string | null
+  /**
+   * Why the change is suggested, as a code the renderer localises.
+   *
+   * One of `nothingHappened`, `hedge`, `inference`, `assistantComparison`,
+   * `duplicate` (the offline check) or `modelDuplicate` (the consolidation pass).
+   */
+  reason: string
+  text: string
+  targetText: string | null
+}
+
+export interface MemorySweepReport {
+  scanned: number
+  proposals: MemorySweepProposal[]
+  /** false when the model was unavailable, so only the offline checks ran */
+  usedModel: boolean
 }
 
 export interface CompanionOverview {

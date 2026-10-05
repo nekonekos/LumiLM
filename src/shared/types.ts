@@ -13,6 +13,7 @@ import type {
   MemoryHit,
   MemoryQuery,
   MemoryStats,
+  MemorySweepReport,
   PersonaCard,
   RelationshipState
 } from './companion'
@@ -969,6 +970,12 @@ export interface LumiLMApi {
     /** accept or reject facts sitting in the review queue */
     approve(ids: string[], accept: boolean): Promise<MemoryFact[]>
     episodes(): Promise<MemoryEpisode[]>
+    /** undo an archive or a supersede */
+    restore(id: string): Promise<MemoryFact[]>
+    /** the tidy-up: returns suggestions, changes nothing */
+    sweep(): Promise<MemorySweepReport>
+    /** applies the suggestions the user accepted */
+    sweepApply(ids: string[]): Promise<MemoryFact[]>
     forgetAll(): Promise<void>
     exportToFile(): Promise<string | null>
     importFromFile(): Promise<MemoryFact[] | null>

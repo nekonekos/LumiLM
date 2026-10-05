@@ -67,6 +67,7 @@ Below are the user's own messages from a conversation. List the durable facts ab
 - Each fact must be one self-contained sentence in the third person, understandable on its own.
 - Prefer lasting things: identity, preferences, habits, important people, ongoing goals, hard boundaries.
 - Skip small talk, greetings, questions, and anything that only mattered for one moment.
+- Write a fact that can happen again as a timeless sentence: 「用户加班到很晚」, never 「用户今天加班到很晚」. Whether it happened once or ten times is worked out elsewhere.
 - At most ${MAX_FACTS_PER_TURN} facts. If there is nothing new worth keeping, output an empty list.
 - Output JSON only. No commentary, no markdown.
 
@@ -306,9 +307,60 @@ const REFUSAL_PATTERN =
  * if it were true.
  */
 const HEDGE_PATTERN =
-  /某种|某个|大概|可能|也许|似乎|应该是|根据.{0,12}(推断|推测)|未(明确)?(说明|提及)|不确定|some kind|some sort|probably|maybe|perhaps|seems to|i (guess|think)|according to/i
+  /某种|某个|大概|可能|也许|或许|大约|好像|似乎|应该是|根据.{0,12}(推断|推测)|据.{0,6}(推断|推测)|猜测|臆测|未(明确)?(说明|提及)|不确定|some kind|some sort|probably|maybe|perhaps|seems to|apparently|likely|supposedly|i (guess|think|assume)/i
+
+/**
+ * Rejects a "nothing happened today" report.
+ *
+ * 「用户今天过得没有特别的事情发生。」 is not a memory, it is the absence of one,
+ * and it is the shape a small model reaches for when the turn was small talk. Two
+ * versions of it were sitting in the reference store, one of them contradicting
+ * the other, and both were being injected into every later prompt as though the
+ * companion had learned something.
+ */
+const NULL_FACT_PATTERN =
+  /没有(什么|啥)?(值得(一提|说)的)?(特别|异常|不同)?的?(事情|事|情况)?发生|没(什么|啥)(特别|异常|不同)的|没什么(值得|好)说的|普通的?一天|平(淡|常)的一天|无事发生|一切(照旧|正常|如常)|没有什么新鲜事|nothing (special|much|unusual|new)|(just )?a normal day|nothing to report/i
+
+/**
+ * Rejects a fact about the user's opinion of the assistant.
+ *
+ * 「用户认为 Lumi（助手）比 lxy 老师更好。」 was in the reference store. Comparing
+ * the companion to other people is the persona's own business, not a fact about
+ * the user, and it reads as flattery once it is handed back as a memory.
+ */
+const ASSISTANT_COMPARISON_PATTERN =
+  /(认为|觉得|觉得|说|表示).{0,4}(lumi|助手|ai|你).{0,8}(比|更)|(lumi|助手).{0,8}比.{0,10}更(好|差|强|懂)|(lumi|助手).{0,6}(最|更)(好|懂|温柔|体贴|听话)|think(s)? (the )?(assistant|ai) is better|prefer(s)? the assistant/i
+
+/**
+ * Rejects conclusions about the user's inner life that they never stated.
+ *
+ * 「用户感到被忽视时会有情绪反应，希望得到关注。」 reads like insight and is
+ * actually the model's own diagnosis, written in the user's voice. A memory store
+ * that admits these starts telling the user who they are.
+ */
+const PSYCHO_INFERENCE_PATTERN =
+  /被忽视|希望得到关注|渴望被关注|需要被关注|需要被认可|内心|潜意识|下意识|缺乏安全感|安全感不足|自卑|讨好型|情绪反应|心理需求|深层(的)?(需求|渴望)|深层次|投射|依恋|feels? (ignored|neglected|unloved)|needs? attention|deep down/i
 /** A fact shorter than this is a fragment, not a sentence worth keeping. */
 const MIN_FACT_CHARS = 4
+
+/**
+ * The reason a candidate text is not worth storing, or null when it is.
+ *
+ * Exported because the memory library's tidy-up re-runs these same rules over what
+ * was stored before the rules existed — the store that prompted them held six rows
+ * of which five were noise, and a filter that only guards new writes would leave
+ * every existing install full of them.
+ */
+export function noiseReason(text: string): string | null {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (normalized.length < MIN_FACT_CHARS) return 'tooShort'
+  if (REFUSAL_PATTERN.test(normalized)) return 'refusal'
+  if (HEDGE_PATTERN.test(normalized)) return 'hedge'
+  if (NULL_FACT_PATTERN.test(normalized)) return 'nothingHappened'
+  if (ASSISTANT_COMPARISON_PATTERN.test(normalized)) return 'assistantComparison'
+  if (PSYCHO_INFERENCE_PATTERN.test(normalized)) return 'inference'
+  return null
+}
 
 function toDraft(source: unknown): MemoryDraft | null {
   if (typeof source !== 'object' || source === null || Array.isArray(source)) return null
@@ -323,8 +375,7 @@ function toDraft(source: unknown): MemoryDraft | null {
   if (!text) return null
 
   const normalized = text.replace(/\s+/g, ' ').trim()
-  if (normalized.length < MIN_FACT_CHARS) return null
-  if (REFUSAL_PATTERN.test(normalized) || HEDGE_PATTERN.test(normalized)) return null
+  if (noiseReason(normalized) !== null) return null
 
   const kindRaw = readString(record, 'kind') ?? readString(record, 'type') ?? 'other'
   const subjectRaw = readString(record, 'subject') ?? 'user'
@@ -591,6 +642,14 @@ export interface ExtractionJob {
   conversationId: string
   /** the finished turn's wire request, reused verbatim for the cache hit */
   options: ExtractOptions
+  /**
+   * When the turn happened.
+   *
+   * The background job runs a second or two later, but a fact's timeline has to be
+   * stamped with the moment the user said it — otherwise a turn just before
+   * midnight and its extraction just after would land on different days.
+   */
+  at?: number
 }
 
 /**

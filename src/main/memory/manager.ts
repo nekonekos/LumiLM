@@ -16,6 +16,8 @@ import type {
 } from '@shared/types'
 import {
   FACT_PROMOTION_STREAK,
+  MAX_FACT_OCCURRENCES,
+  MAX_FACT_PROVENANCE,
   MAX_SEED_THOUGHTS,
   MAX_MEMORY_FACTS,
   SEED_THOUGHT_TTL_MS
@@ -23,6 +25,8 @@ import {
 import { logger } from '../util/logger'
 import { ensureDataDirs, getPaths } from '../store/paths'
 import { settingsStore } from '../store/settings'
+import { MAX_PROTECTED_CANDIDATES } from './consolidate'
+import { localDayKey } from './day'
 import { LexicalIndex, textSimilarity } from './lexical-index'
 import {
   createHeartbeatStore,
@@ -52,6 +56,22 @@ export interface RememberContext {
   messageIds: string[]
 }
 
+/**
+ * One consolidation decision, already resolved to a real draft and a real row.
+ *
+ * `at` is the moment the turn happened, not the moment the decision was made: the
+ * consolidation pass runs a second or two later, but a fact's timeline should be
+ * stamped with when the user said it.
+ */
+export interface MemoryVerdict {
+  draft: MemoryDraft
+  op: 'new' | 'same' | 'supersede'
+  /** the row the decision applies to; null when the pass named none */
+  targetId: string | null
+  why: string
+  at?: number
+}
+
 export interface RecallOptions {
   limit?: number
   /** used by the library's dry-run, which must not count as real usage */
@@ -66,13 +86,6 @@ function clamp(value: number, min: number, max: number): number {
 
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, MAX_FACT_CHARS)
-}
-
-function localDayKey(timestamp: number): string {
-  const date = new Date(timestamp)
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${date.getFullYear()}-${month}-${day}`
 }
 
 /**
@@ -188,6 +201,7 @@ class MemoryManager {
       if (!query.includeArchived && fact.archived) return false
       if (query.includePending === false && fact.pending) return false
       if (query.pinnedOnly && !fact.pinned) return false
+    if (query.repeatedOnly && fact.occurrences.length < 2) return false
       if (query.minImportance !== undefined && fact.importance < query.minImportance) return false
       if (query.kinds && query.kinds.length > 0 && !query.kinds.includes(fact.kind)) return false
       if (query.subject && query.subject !== 'all' && fact.subject !== query.subject) return false
@@ -223,56 +237,89 @@ class MemoryManager {
     context: RememberContext,
     settings: CompanionSettings
   ): MemoryFact[] {
+    // No consolidation available: every draft stands on its own and the lexical
+    // check below is the only thing standing between the store and duplicates.
+    return this.applyVerdicts(
+      drafts.map((draft) => ({ draft, op: 'new' as const, targetId: null, why: '' })),
+      context,
+      settings
+    )
+  }
+
+  /**
+   * Writes consolidated facts into long-term memory.
+   *
+   * The decisions come from the consolidation pass, but nothing here is taken on
+   * faith: the target is resolved against the live snapshot, and a verdict that
+   * cannot be applied degrades to a plain insert plus the lexical near-duplicate
+   * check. Losing a fact is the one outcome that is never acceptable, so every
+   * failure path still stores something.
+   */
+  applyVerdicts(
+    verdicts: MemoryVerdict[],
+    context: RememberContext,
+    settings: CompanionSettings
+  ): MemoryFact[] {
     const snapshot = this.s()
     const now = Date.now()
     const stored: MemoryFact[] = []
     let factsChanged = false
 
-    for (const draft of drafts) {
+    for (const verdict of verdicts) {
+      const draft = verdict.draft
       const text = normalizeText(draft.text)
       if (text.length === 0) continue
+      const at = verdict.at ?? now
 
-      const existing = snapshot.facts.find(
-        (fact) => !fact.archived && textSimilarity(fact.text, text) >= MERGE_THRESHOLD
-      )
+      const target = verdict.targetId
+        ? snapshot.facts.find((fact) => fact.id === verdict.targetId)
+        : undefined
 
-      if (existing) {
-        existing.reinforcements += 1
-        existing.updatedAt = now
-        existing.confidence = clamp(Math.max(existing.confidence, draft.confidence), 0, 1)
-        if (existing.reinforcements >= FACT_PROMOTION_STREAK) {
-          existing.importance = clamp(Math.max(existing.importance, draft.importance) + 1, 1, 5)
-        } else {
-          existing.importance = clamp(Math.max(existing.importance, draft.importance), 1, 5)
-        }
-        // A fact the user rejected stays rejected unless they ask for it back.
-        if (!existing.archived) stored.push(existing)
+      if (verdict.op === 'same' && target) {
+        this.mergeInto(target, draft, at, now, verdict.why, context)
+        if (!target.archived) stored.push(target)
         continue
       }
 
-      const fact: MemoryFact = {
-        id: randomUUID(),
-        text,
-        kind: draft.kind,
-        subject: draft.subject,
-        importance: clamp(Math.round(draft.importance), 1, 5),
-        confidence: clamp(draft.confidence, 0, 1),
-        createdAt: now,
-        updatedAt: now,
-        lastUsedAt: 0,
-        useCount: 0,
-        reinforcements: 0,
-        sourceConversationId: context.conversationId,
-        sourceMessageIds: [...context.messageIds],
-        pinned: false,
-        suppressed: false,
-        archived: false,
-        pending: !settings.autoAcceptFacts,
-        embedding: null
+      const inserted = this.insertFact(draft, context, settings, now, at)
+
+      if (verdict.op === 'supersede' && target) {
+        // The old row is archived, not deleted: it stays in the library behind
+        // 「包含已归档」 with a way back, so a wrong supersede is recoverable.
+        target.supersededBy = inserted.id
+        target.archived = true
+        this.recordProvenance(target, 'superseded', inserted.id, verdict.why, now)
+        inserted.provenance.push({
+          op: 'supersede',
+          of: target.id,
+          at: now,
+          why: verdict.why
+        })
+        snapshot.facts.push(inserted)
+        stored.push(inserted)
+        factsChanged = true
+        continue
       }
 
-      snapshot.facts.push(fact)
-      stored.push(fact)
+      if (!target) {
+        // The model named no target. Re-stating a fact is the one shape it was
+        // measured to get wrong, so the lexical check still gets a say before a
+        // new row is allowed in.
+        const near = snapshot.facts.find(
+          (fact) =>
+            !fact.archived &&
+            !fact.supersededBy &&
+            textSimilarity(fact.text, text) >= MERGE_THRESHOLD
+        )
+        if (near) {
+          this.mergeInto(near, draft, at, now, 'lexical', context)
+          stored.push(near)
+          continue
+        }
+      }
+
+      snapshot.facts.push(inserted)
+      stored.push(inserted)
       factsChanged = true
     }
 
@@ -283,6 +330,230 @@ class MemoryManager {
       this.emit()
     }
     return stored
+  }
+
+  private insertFact(
+    draft: MemoryDraft,
+    context: RememberContext,
+    settings: CompanionSettings,
+    now: number,
+    at: number
+  ): MemoryFact {
+    const fact: MemoryFact = {
+      id: randomUUID(),
+      text: normalizeText(draft.text),
+      kind: draft.kind,
+      subject: draft.subject,
+      importance: clamp(Math.round(draft.importance), 1, 5),
+      confidence: clamp(draft.confidence, 0, 1),
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: 0,
+      useCount: 0,
+      reinforcements: 0,
+      occurrences: [],
+      supersededBy: null,
+      mergedFrom: [],
+      provenance: [],
+      sourceConversationId: context.conversationId,
+      sourceMessageIds: [...context.messageIds],
+      pinned: false,
+      suppressed: false,
+      archived: false,
+      pending: !settings.autoAcceptFacts,
+      embedding: null
+    }
+    if (draft.kind === 'event') this.appendOccurrence(fact, at, draft.text, context)
+    return fact
+  }
+
+  /**
+   * Folds a re-learned fact into the row that already holds it.
+   *
+   * An event recurring on a later day extends its timeline instead of rewriting
+   * it; anything else just gets reinforced. The text itself is never replaced:
+   * letting the model re-word a stored fact on every mention is how the store
+   * drifted into five paraphrases of the same thing.
+   */
+  private mergeInto(
+    target: MemoryFact,
+    draft: MemoryDraft,
+    at: number,
+    now: number,
+    why: string,
+    context: RememberContext
+  ): void {
+    target.reinforcements += 1
+    target.updatedAt = now
+    target.confidence = clamp(Math.max(target.confidence, draft.confidence), 0, 1)
+    if (target.reinforcements >= FACT_PROMOTION_STREAK) {
+      target.importance = clamp(Math.max(target.importance, draft.importance) + 1, 1, 5)
+    } else {
+      target.importance = clamp(Math.max(target.importance, draft.importance), 1, 5)
+    }
+    if (target.kind === 'event' || draft.kind === 'event') {
+      this.appendOccurrence(target, at, draft.text, context)
+    }
+    this.recordProvenance(target, 'same', target.id, why, now)
+  }
+
+  /** Adds one dated instance, unless that local day is already on the timeline. */
+  private appendOccurrence(
+    fact: MemoryFact,
+    at: number,
+    note: string,
+    context: RememberContext
+  ): void {
+    const dateKey = localDayKey(at)
+    if (fact.occurrences.some((entry) => entry.dateKey === dateKey)) return
+    fact.occurrences.unshift({
+      at,
+      dateKey,
+      note: normalizeText(note),
+      conversationId: context.conversationId
+    })
+    fact.occurrences.sort((a, b) => b.at - a.at)
+    if (fact.occurrences.length > MAX_FACT_OCCURRENCES) {
+      fact.occurrences = fact.occurrences.slice(0, MAX_FACT_OCCURRENCES)
+    }
+  }
+
+  private recordProvenance(
+    fact: MemoryFact,
+    op: string,
+    of: string | null,
+    why: string,
+    now: number
+  ): void {
+    if (why.length === 0 && op === 'same') return
+    fact.provenance.push({ op, of, at: now, why: why.slice(0, 200) })
+    if (fact.provenance.length > MAX_FACT_PROVENANCE) {
+      fact.provenance = fact.provenance.slice(-MAX_FACT_PROVENANCE)
+    }
+  }
+
+  /** Puts a superseded fact back, for the library's undo action. */
+  restoreFact(id: string): MemoryFact[] {
+    const snapshot = this.s()
+    const fact = snapshot.facts.find((entry) => entry.id === id)
+    if (fact) {
+      fact.supersededBy = null
+      fact.archived = false
+      fact.updatedAt = Date.now()
+      this.commit()
+    }
+    return this.listFacts({ includeArchived: true, includePending: true })
+  }
+
+  /**
+   * Retires a stored fact without deleting it.
+   *
+   * Used by the tidy-up for rows that no longer pass the noise filters. The row is
+   * archived rather than dropped, and `supersededBy` is left null when nothing
+   * replaced it, so the library can tell "this was noise" from "this was corrected".
+   */
+  archiveFact(id: string, reason: string): MemoryFact[] {
+    const snapshot = this.s()
+    const fact = snapshot.facts.find((entry) => entry.id === id)
+    if (fact && !fact.archived) {
+      fact.archived = true
+      fact.updatedAt = Date.now()
+      this.recordProvenance(fact, 'tidied', null, reason, Date.now())
+      this.commit()
+    }
+    return this.listFacts({ includeArchived: true, includePending: true })
+  }
+
+  /**
+   * Folds one stored row into another, keeping the loser recoverable.
+   *
+   * The phrasing that is folded away is not thrown out: it is kept as the loser's
+   * own row (archived, pointing at the survivor) and its wording is recorded on the
+   * survivor, so nothing the user ever said becomes unreachable.
+   */
+  mergeFacts(sourceId: string, targetId: string, reason: string): MemoryFact[] {
+    const snapshot = this.s()
+    const source = snapshot.facts.find((fact) => fact.id === sourceId)
+    const target = snapshot.facts.find((fact) => fact.id === targetId)
+    if (source && target && source.id !== target.id && !source.archived) {
+      const now = Date.now()
+      this.mergeInto(
+        target,
+        {
+          text: source.text,
+          kind: source.kind,
+          subject: source.subject,
+          importance: source.importance,
+          confidence: source.confidence
+        },
+        source.createdAt,
+        now,
+        reason,
+        { conversationId: source.sourceConversationId, messageIds: [] }
+      )
+      source.supersededBy = target.id
+      source.archived = true
+      target.mergedFrom.push(source.id)
+      this.commit()
+    }
+    return this.listFacts({ includeArchived: true, includePending: true })
+  }
+
+  /**
+   * The rows the consolidation pass is offered for one draft.
+   *
+   * The shortlist is pure lexical recall, which is the one job lexical scoring is
+   * genuinely good at: measured across catalogue sizes from 5 to 1955 entries, the
+   * row that should match ranked first every time. Precision is the model's job.
+   *
+   * Boundary and pinned rows ride along regardless of the query — they are the ones
+   * a duplicate must not be created alongside, and they are few by definition.
+   */
+  shortlist(text: string, limit: number, protectedLimit = MAX_PROTECTED_CANDIDATES): MemoryFact[] {
+    const pool = this.s().facts.filter((fact) => !fact.archived && !fact.supersededBy)
+    const ranked = this.ensureIndex()
+      .rank(pool, text, limit)
+      .map((entry) => entry.fact)
+    return this.assembleShortlist(pool, ranked, protectedLimit)
+  }
+
+  /**
+   * The same shortlist, with rows the caller is itself asking about removed.
+   *
+   * The tidy-up compares stored rows with each other, so without this every row
+   * would be offered to itself as its own best match.
+   */
+  shortlistExcluding(
+    text: string,
+    limit: number,
+    excludeIds: ReadonlySet<string>,
+    protectedLimit = MAX_PROTECTED_CANDIDATES
+  ): MemoryFact[] {
+    const pool = this.s().facts.filter(
+      (fact) => !fact.archived && !fact.supersededBy && !excludeIds.has(fact.id)
+    )
+    const ranked = this.ensureIndex()
+      .rank(pool, text, limit)
+      .map((entry) => entry.fact)
+    return this.assembleShortlist(pool, ranked, protectedLimit)
+  }
+
+  private assembleShortlist(
+    pool: MemoryFact[],
+    ranked: MemoryFact[],
+    protectedLimit: number
+  ): MemoryFact[] {
+    const seen = new Set(ranked.map((fact) => fact.id))
+    const protectedFacts: MemoryFact[] = []
+    for (const fact of pool) {
+      if (seen.has(fact.id)) continue
+      if (fact.kind !== 'boundary' && !fact.pinned) continue
+      seen.add(fact.id)
+      protectedFacts.push(fact)
+      if (protectedFacts.length >= protectedLimit) break
+    }
+
+    return [...ranked, ...protectedFacts]
   }
 
   /** Keeps the store bounded by dropping the least valuable unpinned facts. */
@@ -372,7 +643,9 @@ class MemoryManager {
     const snapshot = this.s()
     // Pending facts are deliberately invisible to the model: the review queue
     // exists precisely so nothing reaches the prompt before the user sees it.
-    const pool = snapshot.facts.filter((fact) => !fact.pending)
+    // A superseded fact is one the user has since contradicted, so it must not
+    // come back from a pin or an old index either.
+    const pool = snapshot.facts.filter((fact) => !fact.pending && !fact.supersededBy)
     const now = options.now ?? Date.now()
 
     const hits = this.ensureIndex().recall(pool, query, {

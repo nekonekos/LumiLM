@@ -172,6 +172,40 @@ describe('readFacts', () => {
     expect(readFacts('a string')).toEqual([])
     expect(readFacts(42)).toEqual([])
   })
+
+  // The four families below were all present in the reference store, where five of
+  // six stored facts were noise. Each one is now rejected before it is ever stored.
+  it('drops a report that nothing happened', () => {
+    expect(readFacts([{ text: '用户今天过得没有特别的事情发生。' }])).toEqual([])
+    expect(readFacts([{ text: '用户今天过得不好，没有发生什么特别的事情。' }])).toEqual([])
+    expect(readFacts([{ text: '用户今天没什么特别的，就是普通的一天。' }])).toEqual([])
+    expect(readFacts([{ text: 'Nothing special happened today.' }])).toEqual([])
+  })
+
+  it('drops the user’s opinion of the assistant', () => {
+    expect(readFacts([{ text: '用户认为 Lumi（助手）比 lxy 老师更好。' }])).toEqual([])
+    expect(readFacts([{ text: '用户觉得助手比同学更懂自己。' }])).toEqual([])
+  })
+
+  it('drops a diagnosis the user never made', () => {
+    expect(readFacts([{ text: '用户感到被忽视时会有情绪反应，希望得到关注。' }])).toEqual([])
+    expect(readFacts([{ text: '用户内心缺乏安全感。' }])).toEqual([])
+  })
+
+  it('drops a fact the model hedged, however it hedged it', () => {
+    expect(readFacts([{ text: '用户好像不太喜欢香菜。' }])).toEqual([])
+    expect(readFacts([{ text: '用户大约每周去一次图书馆。' }])).toEqual([])
+    expect(readFacts([{ text: '用户可能是南方人。' }])).toEqual([])
+  })
+
+  it('keeps a plain statement that merely looks similar', () => {
+    const facts = readFacts([
+      { text: '用户在学校有一位学工处主任叫lxy，用户觉得这个人很烦人。' },
+      { text: '用户讨厌吵闹的环境。' },
+      { text: '用户有一只叫小黑的猫。' }
+    ])
+    expect(facts.map((fact) => fact.text)).toHaveLength(3)
+  })
 })
 
 describe('withPrefill', () => {

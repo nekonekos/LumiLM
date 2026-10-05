@@ -25,6 +25,7 @@ Electron + React + llama.cpp, tuned for GPUs with ~8 GB of VRAM.
 | **Optional agent** | Plain chat by default; switch to Agent mode to reach MCP tools and skills that act on files, shells and other environments |
 | **Digital companion** | A third mode: layered memory and proactive wake-ups, with character cards imported from SillyTavern V2 or written from scratch |
 | **Transparent memory** | The memory library shows every fact the companion holds, ready to edit, pin or delete; nothing reaches the prompt before you accept it |
+| **Quiet memory** | Silent consolidation removes duplicates and rejects noise, and a repeated event is kept as one row with a dated timeline instead of a pile of paraphrases |
 | **Transparent prompting** | Every injected prompt block can be inspected, edited or switched off, with its token cost shown |
 | **Highly configurable** | Every conversation stores its own sampling parameters and system prompt, and can be saved as a reusable preset |
 | **Polished UI** | Light-blue theme with a dark mode, system-preference following, custom accent colour and font size |
@@ -310,9 +311,56 @@ It reads only the user's own words. It does **not** read:
 - the assistant's replies, which it would otherwise re-learn as facts about you,
 - the injected memory block, which it would otherwise index as new facts
   ("affinity 60/100" and so on, accumulating every turn),
-- hedged statements — "some kind of", "probably", "inferred from", "not stated" are all dropped.
+- hedged statements — "some kind of", "probably", "inferred from", "not stated" are all dropped,
+- "nothing special happened today" style reports, which are the absence of a fact,
+- comparisons of the assistant with other people, and armchair psychology like
+  "wants attention" that the user never actually said.
 
 Results land in a pending queue and take part in nothing until you accept them.
+
+### Silent consolidation (deduplication)
+
+After extraction, a **separate call** decides what each new fact is in relation to what is
+already stored: `same` (the same thing), `supersede` (a contradiction, the newer one wins) or
+`new`.
+
+- **It can only ever return a decision, never text.** The output is just `{i, op, of}`, and
+  every field is validated: the index must address a real draft, the number must resolve to a
+  real row, and anything else falls back to the lexical check. Even if the model echoed the
+  memory-strategy prompt verbatim, none of it could reach the store.
+- Its context is two short tables (≤12 catalogue rows + ≤6 candidates) and **does not grow with
+  the conversation**. The catalogue is deliberately *not* folded into the extraction call —
+  measured, the model then copies a catalogue entry straight into its facts array.
+- **The model never judges dates.** Asked to tell "the same event again" from "a different
+  event", accuracy dropped to 10/13 on a one-line wording change. With the model answering only
+  `new` / `same` / `supersede` and the turn's own timestamp deciding whether a timeline entry is
+  added, it measured 13/13. The cost is ~490 prompt tokens, ~25 generated tokens, no thinking
+  tokens, about a second.
+- A merge **never rewrites the stored wording**, and no failure path loses a fact: anything that
+  cannot be applied is stored as new with the lexical backstop.
+
+### Temporal depth
+
+An objective event that happens repeatedly is kept as **one row** with one dated occurrence per
+instance (date, the wording used at the time, the conversation it came from):
+
+- mentioning it twice in one day counts once,
+- the library shows `×3 · 04-12` and expands to the full timeline, where single entries can be
+  deleted,
+- the prompt gets "用户加班到很晚（已发生 3 次，最近一次是昨天）" — "worked late again
+  (3×, most recently yesterday)",
+- opinions, feelings, goals and preferences never get a timeline: repeating those is `same`,
+  not another occurrence.
+
+### Tidy up
+
+A one-off check over what is **already** stored, for the noise that accumulated before these
+rules existed: the tightened filters, verbatim duplicates (pure lexical, **no model needed**),
+and semantic duplicates via the consolidation pass.
+
+It only ever proposes. Each suggestion is a checkbox, and applying one archives the losing row
+rather than deleting it, so it can be brought back at any time. The offline half works with the
+model unloaded.
 
 ### Proactive wake-ups
 
@@ -341,6 +389,10 @@ The memory library in the sidebar lets you:
 
 - browse every fact like a diary, filter by kind / subject / status, and search,
 - edit, pin, hide, archive or delete individual facts, or forget everything at once,
+- bring back a fact that was replaced, at the click of a button,
+- see `×3 · <date>` on anything that repeats and expand its full timeline,
+- filter to "repeats only" to see what keeps coming back,
+- run "Tidy up" to review duplicate and noisy rows before anything changes,
 - accept or reject the pending queue in bulk,
 - see and hand-edit affinity, nickname, stage and mood in the relationship panel,
 - read the event timeline and session summaries.

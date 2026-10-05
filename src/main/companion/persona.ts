@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import type { MemoryEpisode, MemoryHit, PersonaCard, RelationshipState } from '@shared/types'
+import type { MemoryEpisode, MemoryFact, MemoryHit, PersonaCard, RelationshipState } from '@shared/types'
 import { BUILTIN_PERSONA_CARD, DEFAULT_CARE_BASELINE } from '@shared/types'
 import { writeJsonAtomicSync } from '../util/atomic-json'
 import { logger, toError } from '../util/logger'
 import { ensureDataDirs, getPaths } from '../store/paths'
 import { renderTemplate } from '../agent/template'
 import { estimateTokens } from '../agent/budget'
+import { shortDayKey } from '../memory/day'
 
 const CARD_VERSION = 1
 
@@ -359,10 +360,29 @@ export function renderRelationship(relationship: RelationshipState, name: string
   return `${name} 与用户的关系 — ${parts.join(' | ')}`
 }
 
+/**
+ * A remembered fact as one line.
+ *
+ * An event that has happened before carries its history with it. 「加班到很晚」 and
+ * 「这是第三次加班，最近一次是昨天」 are different things to be told, and the second
+ * is the whole point of tracking occurrences: without it the timeline would exist
+ * in the library and nowhere the model can see.
+ */
+export function factLine(fact: MemoryFact, now = Date.now()): string {
+  const latest = fact.occurrences[0]
+  if (!latest) return fact.text
+
+  const days = Math.max(0, Math.floor((now - latest.at) / 86_400_000))
+  const when =
+    days === 0 ? '最近一次是今天' : days === 1 ? '最近一次是昨天' : `最近一次 ${shortDayKey(latest.dateKey)}`
+  const times = fact.occurrences.length > 1 ? `已发生 ${fact.occurrences.length} 次，` : ''
+  return `${fact.text}（${times}${when}）`
+}
+
 export function renderMemories(hits: MemoryHit[]): string {
   return hits
     .filter((hit) => hit.fact.kind !== 'boundary')
-    .map((hit) => `- ${hit.fact.text}`)
+    .map((hit) => `- ${factLine(hit.fact)}`)
     .join('\n')
 }
 

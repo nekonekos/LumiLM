@@ -27,6 +27,7 @@ const {
   renderRelationship,
   renderMemories,
   renderBoundaries,
+  factLine,
   renderEpisodes,
   cardFileName
 } = await import('../src/main/companion/persona')
@@ -46,7 +47,11 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true })
 })
 
-function hit(text: string, kind: MemoryFact['kind'] = 'other'): MemoryHit {
+function hit(
+  text: string,
+  kind: MemoryFact['kind'] = 'other',
+  occurrences: MemoryFact['occurrences'] = []
+): MemoryHit {
   return {
     fact: {
       id: text,
@@ -60,6 +65,10 @@ function hit(text: string, kind: MemoryFact['kind'] = 'other'): MemoryHit {
       lastUsedAt: 0,
       useCount: 0,
       reinforcements: 0,
+      occurrences,
+      supersededBy: null,
+      mergedFrom: [],
+      provenance: [],
       sourceConversationId: null,
       sourceMessageIds: [],
       pinned: false,
@@ -334,6 +343,37 @@ describe('relationship and memory rendering', () => {
     const hits = [hit('用户讨厌香菜'), hit('用户对打雷有强烈恐惧', 'boundary')]
     expect(renderMemories(hits)).toBe('- 用户讨厌香菜')
     expect(renderBoundaries(hits)).toBe('- 用户对打雷有强烈恐惧')
+  })
+
+  it('carries an event’s history into the prompt', () => {
+    const now = Date.parse('2026-03-10T12:00:00')
+    const repeated = hit('用户加班到很晚', 'event', [
+      { at: now, dateKey: '2026-03-10', note: '用户又加班了', conversationId: 'c1' },
+      { at: now - 86_400_000, dateKey: '2026-03-09', note: '用户加班到很晚', conversationId: 'c1' },
+      { at: now - 3 * 86_400_000, dateKey: '2026-03-07', note: '用户加班到很晚', conversationId: 'c1' }
+    ])
+    expect(factLine(repeated.fact, now)).toBe('用户加班到很晚（已发生 3 次，最近一次是今天）')
+    expect(renderMemories([repeated])).toContain('已发生 3 次')
+  })
+
+  it('names the day when the last occurrence was not today', () => {
+    const now = Date.parse('2026-03-10T12:00:00')
+    const once = hit('用户加班到很晚', 'event', [
+      { at: now - 2 * 86_400_000, dateKey: '2026-03-08', note: 'x', conversationId: null }
+    ])
+    expect(factLine(once.fact, now)).toBe('用户加班到很晚（最近一次 03-08）')
+  })
+
+  it('says yesterday when that is what it was', () => {
+    const now = Date.parse('2026-03-10T12:00:00')
+    const recent = hit('用户加班到很晚', 'event', [
+      { at: now - 86_400_000, dateKey: '2026-03-09', note: 'x', conversationId: null }
+    ])
+    expect(factLine(recent.fact, now)).toBe('用户加班到很晚（最近一次是昨天）')
+  })
+
+  it('leaves a fact with no timeline exactly as it was', () => {
+    expect(factLine(hit('用户讨厌香菜').fact)).toBe('用户讨厌香菜')
   })
 
   it('renders episodes newest first with their highlights', () => {

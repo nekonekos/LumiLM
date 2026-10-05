@@ -1,7 +1,7 @@
 {
   "name": "lumilm",
   "productName": "LumiLM",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "LumiLM - 本地大模型桌面客户端 / Local LLM desktop client powered by llama.cpp",
   "author": {
