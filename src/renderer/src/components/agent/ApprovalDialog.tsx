@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { Button, Dialog } from '@/components/ui'
 import { useT } from '@/i18n'
-import { useAgentStore } from '@/stores/agent'
+import { useAgentSession } from '@/stores/agent-session'
 
 function formatArgs(args: Record<string, unknown>): string {
   try {
@@ -18,10 +18,13 @@ function formatArgs(args: Record<string, unknown>): string {
  */
 export function ApprovalDialog(): ReactNode {
   const t = useT()
-  const approval = useAgentStore((state) => state.approval)
-  const decide = useAgentStore((state) => state.decide)
+  const approvals = useAgentSession((state) => state.approvals)
+  const approve = useAgentSession((state) => state.approve)
+  const approval = Object.values(approvals)[0] ?? null
 
   if (!approval) return null
+  const decide = (decision: 'deny' | 'allow' | 'allow-session'): Promise<void> =>
+    approve(approval.callId, decision)
 
   return (
     <Dialog

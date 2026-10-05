@@ -21,6 +21,7 @@ export function createInitialServerState(): ServerState {
     degradedRetries: 0,
     commandLine: null,
     supportsTools: null,
+    thinking: 'unlimited',
     metrics: null
   }
 }

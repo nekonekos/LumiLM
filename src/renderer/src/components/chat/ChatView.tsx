@@ -4,10 +4,8 @@ import type { ToolCallResult } from '@shared/types'
 import { Button, ProgressBar } from '@/components/ui'
 import { Composer } from '@/components/chat/Composer'
 import { MessageBubble } from '@/components/chat/MessageBubble'
-import { ApprovalDialog } from '@/components/agent/ApprovalDialog'
 import { cn } from '@/lib/cn'
 import { useT } from '@/i18n'
-import { useAgentStore } from '@/stores/agent'
 import { useChatStore } from '@/stores/chat'
 import { useModelsStore } from '@/stores/models'
 import { useSettingsStore } from '@/stores/settings'
@@ -119,9 +117,6 @@ export function ChatView(): ReactNode {
     [messages]
   )
 
-  const approvals = useAgentStore((state) => state.decisions)
-  const approvalCallId = useAgentStore((state) => state.approval?.callId ?? null)
-
   const isEmpty = visibleMessages.length === 0
   const hasModel = models.length > 0
 
@@ -212,8 +207,6 @@ export function ChatView(): ReactNode {
                   streamReasoning={stream?.reasoning}
                   streamToolCalls={stream?.toolCalls}
                   toolResults={toolResults}
-                  approvals={approvals}
-                  approvalCallId={approvalCallId}
                   canAct={stream === null}
                   onRegenerate={(id) => void regenerate(id)}
                   onEdit={(id, content) => void editMessage(id, content)}
@@ -237,7 +230,6 @@ export function ChatView(): ReactNode {
       ) : null}
 
       <Composer />
-      <ApprovalDialog />
     </div>
   )
 }

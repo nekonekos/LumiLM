@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
-import type { ToolRisk } from '@shared/types'
-import { resolveForWrite, resolveInside } from '../skills/registry'
+import { isInside, resolveForWrite, resolveInside } from '../skills/registry'
+import type { BuiltinToolDef } from './types'
 
 const MAX_READ_BYTES = 1024 * 1024
 const MAX_WRITE_BYTES = 1024 * 1024
@@ -10,17 +11,13 @@ const MAX_SEARCH_FILES = 2000
 const MAX_SEARCH_HITS = 100
 const SKIPPED_DIRS = new Set(['node_modules', '.git', 'out', 'release', 'dist', '.cache'])
 
-export interface WorkspaceToolResult {
-  content: string
-  ok: boolean
-}
-
-export interface WorkspaceToolDef {
-  toolName: string
-  description: string
-  inputSchema: Record<string, unknown>
-  risk: ToolRisk
-  run(root: string, args: Record<string, unknown>): Promise<WorkspaceToolResult>
+/**
+ * The directory the built-in tools operate on. Enabling a group without picking
+ * a folder would otherwise leave the model with no tools at all, which reads as
+ * "the model cannot use tools" rather than "nothing is configured".
+ */
+export function effectiveWorkspaceRoot(configured: string | null | undefined): string {
+  return configured && configured.trim().length > 0 ? resolve(configured) : homedir()
 }
 
 function asString(args: Record<string, unknown>, key: string): string | null {
@@ -31,26 +28,36 @@ function asString(args: Record<string, unknown>, key: string): string | null {
 /** Returns the resolved absolute path, or a refusal message. */
 function target(root: string, raw: string, mustExist: boolean): { path: string } | { error: string } {
   const absolute = resolve(root, raw)
+  // Reject a lexical escape before touching the disk, so a missing path inside
+  // the root is reported as missing rather than as a sandbox violation.
+  if (!isInside(root, absolute)) {
+    return { error: `refused: "${raw}" is outside the workspace root` }
+  }
+  if (mustExist && !existsSync(absolute)) {
+    return { error: `not found: ${raw}` }
+  }
+
+  // Resolves symlinks, so a link inside the root cannot point outside it.
   const resolved = mustExist ? resolveInside(root, absolute) : resolveForWrite(root, absolute)
   if (!resolved) {
     return { error: `refused: "${raw}" is outside the workspace root` }
   }
-  if (mustExist && !existsSync(resolved)) {
-    return { error: `not found: ${raw}` }
-  }
   return { path: resolved }
 }
 
-export const WORKSPACE_TOOL_DEFS: WorkspaceToolDef[] = [
+/**
+ * The four read/write tools. Descriptions stay one line and the schemas carry
+ * no per-property help text: a local 8B model has a small context and picks a
+ * tool from its name far more reliably than from prose.
+ */
+export const FILE_TOOL_DEFS: BuiltinToolDef[] = [
   {
     toolName: 'read_file',
-    description: 'Read a UTF-8 text file from the workspace. Paths are relative to the workspace root.',
+    description: 'Read a UTF-8 text file. Paths are relative to the workspace root.',
     risk: 'read-only',
     inputSchema: {
       type: 'object',
-      properties: {
-        path: { type: 'string', description: 'File path relative to the workspace root' }
-      },
+      properties: { path: { type: 'string' } },
       required: ['path']
     },
     async run(root, args) {
@@ -62,28 +69,29 @@ export const WORKSPACE_TOOL_DEFS: WorkspaceToolDef[] = [
       const stats = statSync(resolved.path)
       if (!stats.isFile()) return { content: `${raw} is not a file`, ok: false }
       if (stats.size > MAX_READ_BYTES) {
-        return { content: `${raw} is too large (${stats.size} bytes, limit ${MAX_READ_BYTES})`, ok: false }
+        return {
+          content: `${raw} is too large (${stats.size} bytes, limit ${MAX_READ_BYTES})`,
+          ok: false
+        }
       }
       return { content: readFileSync(resolved.path, 'utf8'), ok: true }
     }
   },
   {
     toolName: 'write_file',
-    description:
-      'Create or overwrite a UTF-8 text file in the workspace. Parent directories must already exist.',
+    description: 'Create or overwrite a UTF-8 text file. Parent directories must already exist.',
     risk: 'destructive',
     inputSchema: {
       type: 'object',
-      properties: {
-        path: { type: 'string', description: 'File path relative to the workspace root' },
-        content: { type: 'string', description: 'Full file content to write' }
-      },
+      properties: { path: { type: 'string' }, content: { type: 'string' } },
       required: ['path', 'content']
     },
     async run(root, args) {
       const raw = asString(args, 'path')
       const content = typeof args.content === 'string' ? args.content : null
-      if (!raw || content === null) return { content: 'missing required arguments: path, content', ok: false }
+      if (!raw || content === null) {
+        return { content: 'missing required arguments: path, content', ok: false }
+      }
       if (Buffer.byteLength(content, 'utf8') > MAX_WRITE_BYTES) {
         return { content: `refused: content exceeds ${MAX_WRITE_BYTES} bytes`, ok: false }
       }
@@ -99,21 +107,21 @@ export const WORKSPACE_TOOL_DEFS: WorkspaceToolDef[] = [
     }
   },
   {
-    toolName: 'list_dir',
-    description: 'List the entries of a workspace directory.',
+    toolName: 'list_files',
+    description: 'List the entries of a directory. Directories are suffixed with "/".',
     risk: 'read-only',
     inputSchema: {
       type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Directory path relative to the root, or "." for the root' }
-      },
+      properties: { path: { type: 'string' } },
       required: ['path']
     },
     async run(root, args) {
       const raw = asString(args, 'path') ?? '.'
       const resolved = target(root, raw, true)
       if ('error' in resolved) return { content: resolved.error, ok: false }
-      if (!statSync(resolved.path).isDirectory()) return { content: `${raw} is not a directory`, ok: false }
+      if (!statSync(resolved.path).isDirectory()) {
+        return { content: `${raw} is not a directory`, ok: false }
+      }
 
       const entries = readdirSync(resolved.path).sort().slice(0, MAX_LIST_ENTRIES)
       const lines = entries.map((entry) => {
@@ -128,14 +136,13 @@ export const WORKSPACE_TOOL_DEFS: WorkspaceToolDef[] = [
   },
   {
     toolName: 'search_files',
-    description:
-      'Search file names and text content inside the workspace. Returns matching lines with their paths.',
+    description: 'Search file names and text content. Matches are returned as "path:line: text".',
     risk: 'read-only',
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Case-insensitive text to look for' },
-        path: { type: 'string', description: 'Directory to search, relative to the root (default ".")' }
+        query: { type: 'string' },
+        path: { type: 'string', description: 'Directory to search, default "."' }
       },
       required: ['query']
     },
@@ -196,7 +203,8 @@ export const WORKSPACE_TOOL_DEFS: WorkspaceToolDef[] = [
       const suffix =
         scanned >= MAX_SEARCH_FILES ? `\n… stopped after scanning ${MAX_SEARCH_FILES} files` : ''
       return {
-        content: hits.length > 0 ? `${hits.join('\n')}${suffix}` : `no matches for "${query}"${suffix}`,
+        content:
+          hits.length > 0 ? `${hits.join('\n')}${suffix}` : `no matches for "${query}"${suffix}`,
         ok: true
       }
     }

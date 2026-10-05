@@ -31,11 +31,13 @@ export function ModeSwitch(): ReactNode {
   const conversation = useChatStore((state) => state.conversation)
   const setMode = useAgentStore((state) => state.setMode)
   const setPermission = useAgentStore((state) => state.setPermission)
+  const settingMode = useSettingsStore((state) => state.settings?.agent.defaultMode)
   const settingPermission = useSettingsStore((state) => state.settings?.agent.permission)
 
-  const mode = conversation?.mode ?? 'chat'
+  // With no conversation open these controls edit the defaults for the next
+  // chat rather than being disabled, which used to block the switch entirely.
+  const mode = conversation?.mode ?? settingMode ?? 'chat'
   const permission = conversation?.agent.permission ?? settingPermission ?? 'ask-risky'
-  const disabled = !conversation
 
   return (
     <div className="flex items-center gap-2">
@@ -53,13 +55,11 @@ export function ModeSwitch(): ReactNode {
               type="button"
               role="radio"
               aria-checked={active}
-              disabled={disabled}
               title={t(value === 'chat' ? 'agent.modeChatHint' : 'agent.modeAgentHint')}
               onClick={() => void setMode(value)}
               className={cn(
                 'inline-flex items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11px] transition-colors',
-                active ? 'bg-brand text-brand-fg' : 'text-fg-muted hover:text-fg',
-                disabled && 'cursor-not-allowed opacity-50'
+                active ? 'bg-brand text-brand-fg' : 'text-fg-muted hover:text-fg'
               )}
             >
               <Icon className="size-3" />
@@ -73,7 +73,6 @@ export function ModeSwitch(): ReactNode {
         <span title={t(PERMISSION_HINTS[permission])} className="inline-flex">
           <Select<AgentPermission>
             value={permission}
-            disabled={disabled}
             options={PERMISSIONS.map((value) => ({
               value,
               label: t(PERMISSION_LABELS[value])

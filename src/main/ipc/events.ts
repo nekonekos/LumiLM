@@ -31,6 +31,10 @@ export function emitChatStream(event: ChatStreamEvent): void {
   send(CH.events.chatStream, event)
 }
 
+export function emitAgentStream(event: ChatStreamEvent): void {
+  send(CH.events.agentStream, event)
+}
+
 export function emitSettingsChanged(settings: AppSettings): void {
   send(CH.events.settingsChanged, settings)
 }

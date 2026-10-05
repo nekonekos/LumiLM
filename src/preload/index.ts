@@ -91,6 +91,10 @@ const api: LumiLMApi = {
       ipcRenderer.invoke(CH.chat.approveTool, streamId, callId, decision) as Promise<void>
   },
   agent: {
+    send: (request: ChatRequest) => ipcRenderer.invoke(CH.agent.send, request) as Promise<void>,
+    abort: (streamId: string) => ipcRenderer.invoke(CH.agent.abort, streamId) as Promise<void>,
+    approveToolCall: (streamId: string, callId: string, decision: ApprovalDecision) =>
+      ipcRenderer.invoke(CH.agent.approveTool, streamId, callId, decision) as Promise<void>,
     previewPrompt: (input: PromptPreviewInput) =>
       ipcRenderer.invoke(CH.agent.previewPrompt, input) as Promise<PromptPreview>
   },
@@ -169,6 +173,7 @@ const api: LumiLMApi = {
     onServerState: (cb: (state: ServerState) => void) => subscribe(CH.events.serverState, cb),
     onServerLog: (cb: (line: string) => void) => subscribe(CH.events.serverLog, cb),
     onChatStream: (cb: (event: ChatStreamEvent) => void) => subscribe(CH.events.chatStream, cb),
+    onAgentStream: (cb: (event: ChatStreamEvent) => void) => subscribe(CH.events.agentStream, cb),
     onSettingsChanged: (cb: (settings: AppSettings) => void) =>
       subscribe(CH.events.settingsChanged, cb),
     onMcpStatus: (cb: (servers: McpServerState[]) => void) => subscribe(CH.events.mcpStatus, cb),

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { FolderOpen } from 'lucide-react'
-import type { AgentPermission, ChatMode } from '@shared/types'
+import type { AgentPermission, AgentThinking, ChatMode } from '@shared/types'
 import { Button, Field, SectionTitle, Select, Slider, Switch, TextArea, TextInput } from '@/components/ui'
 import { useT, type MessageKey } from '@/i18n'
 import { useSettingsStore } from '@/stores/settings'
@@ -17,6 +17,14 @@ const PERMISSION_LABELS: Record<AgentPermission, MessageKey> = {
   auto: 'agent.permissionAuto'
 }
 
+const THINKING_LEVELS: AgentThinking[] = ['unlimited', 'brief', 'minimal']
+
+const THINKING_LABELS: Record<AgentThinking, MessageKey> = {
+  unlimited: 'agent.thinking.unlimited',
+  brief: 'agent.thinking.brief',
+  minimal: 'agent.thinking.minimal'
+}
+
 /** Defaults and the editable prompt template for agent mode. */
 export function AgentTab(): ReactNode {
   const t = useT()
@@ -30,7 +38,7 @@ export function AgentTab(): ReactNode {
   const pickWorkspace = async (): Promise<void> => {
     const directory = await window.lumilm.dialog.pickDirectory()
     if (!directory) return
-    await update({ agent: { workspaceRoot: directory, workspaceToolsEnabled: true } })
+    await update({ agent: { workspaceRoot: directory } })
     pushToast({ kind: 'success', message: directory })
   }
 
@@ -57,6 +65,17 @@ export function AgentTab(): ReactNode {
             options={(['ask-all', 'ask-risky', 'auto'] as const).map((value) => ({
               value,
               label: t(PERMISSION_LABELS[value])
+            }))}
+          />
+        </Field>
+
+        <Field label={t('settings.agentThinking')} hint={t('agent.thinkingHint')}>
+          <Select<AgentThinking>
+            value={agent.thinking}
+            onChange={(value) => void update({ agent: { thinking: value } })}
+            options={THINKING_LEVELS.map((value) => ({
+              value,
+              label: t(THINKING_LABELS[value])
             }))}
           />
         </Field>
@@ -132,16 +151,22 @@ export function AgentTab(): ReactNode {
       </section>
 
       <section className="flex flex-col gap-3">
-        <SectionTitle>{t('settings.agentWorkspaceTools')}</SectionTitle>
-        <p className="text-[11px] leading-snug text-fg-subtle">
-          {t('settings.agentWorkspaceHint')}
-        </p>
+        <SectionTitle>{t('settings.agentBuiltinTools')}</SectionTitle>
+        <p className="text-[11px] leading-snug text-fg-subtle">{t('settings.agentWorkspaceHint')}</p>
 
-        <Field label={t('settings.agentWorkspaceTools')}>
+        <Field label={t('settings.agentFileTools')} hint={t('settings.agentFileToolsHint')}>
           <Switch
-            checked={agent.workspaceToolsEnabled}
-            label={t('settings.agentWorkspaceTools')}
-            onChange={(checked) => void update({ agent: { workspaceToolsEnabled: checked } })}
+            checked={agent.fileToolsEnabled}
+            label={t('settings.agentFileTools')}
+            onChange={(checked) => void update({ agent: { fileToolsEnabled: checked } })}
+          />
+        </Field>
+
+        <Field label={t('settings.agentShellTools')} hint={t('settings.agentShellToolsHint')}>
+          <Switch
+            checked={agent.shellToolsEnabled}
+            label={t('settings.agentShellTools')}
+            onChange={(checked) => void update({ agent: { shellToolsEnabled: checked } })}
           />
         </Field>
 
@@ -149,7 +174,7 @@ export function AgentTab(): ReactNode {
           <div className="flex items-center gap-2">
             <TextInput
               value={agent.workspaceRoot ?? ''}
-              placeholder="—"
+              placeholder={t('tools.homeDir')}
               onChange={(event) => void update({ agent: { workspaceRoot: event.target.value || null } })}
             />
             <Button variant="secondary" onClick={() => void pickWorkspace()}>
@@ -158,6 +183,8 @@ export function AgentTab(): ReactNode {
             </Button>
           </div>
         </Field>
+
+        <p className="text-[11px] leading-snug text-fg-subtle">{t('settings.agentToolsTokenHint')}</p>
       </section>
 
       <section className="flex flex-col gap-3">

@@ -6,6 +6,7 @@ import { DEFAULT_SAMPLING } from '@shared/types'
 import { readJsonSync, writeJsonAtomicSync } from '../util/atomic-json'
 import { logger } from '../util/logger'
 import { ensureDataDirs, getPaths } from './paths'
+import { settingsStore } from './settings'
 
 const MAX_TITLE_LENGTH = 48
 const MAX_PREVIEW_LENGTH = 90
@@ -127,7 +128,9 @@ class ConversationStore {
       modelId: init?.modelId ?? null,
       systemPrompt: '',
       sampling: init?.sampling ? { ...DEFAULT_SAMPLING, ...init.sampling } : { ...DEFAULT_SAMPLING },
-      mode: 'chat',
+      // Hardcoding this made the `默认模式` setting a no-op: every new
+      // conversation opened in 纯对话 no matter what was configured.
+      mode: settingsStore.get().agent.defaultMode,
       agent: {},
       messages: []
     }

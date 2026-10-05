@@ -9,13 +9,15 @@ import type { ToolCatalogue } from '../src/main/agent/tools'
 const AGENT_SETTINGS: AgentSettings = {
   defaultMode: 'chat',
   permission: 'ask-risky',
+  thinking: 'unlimited',
   maxIterations: 6,
   maxToolResultChars: 8000,
   toolSchemaTokenWarn: 1500,
   injectPrompt: true,
   preambleTemplate: DEFAULT_AGENT_PREAMBLE,
   parseTextToolCalls: true,
-  workspaceToolsEnabled: false,
+  fileToolsEnabled: false,
+  shellToolsEnabled: false,
   workspaceRoot: null,
   allowRemoteMcp: false
 }

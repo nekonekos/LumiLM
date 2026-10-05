@@ -7,6 +7,7 @@ import type {
 } from '@shared/types'
 import { buildToolCatalogue, type ToolCatalogue } from './tools'
 import { renderTemplate } from './template'
+import { effectiveWorkspaceRoot } from '../tools/workspace'
 
 export { renderTemplate }
 
@@ -68,7 +69,7 @@ export function composePrompt(
           skills,
           servers,
           os: `${platform()} ${release()} (${arch()})`,
-          cwd: settings.workspaceRoot ?? process.cwd()
+          cwd: effectiveWorkspaceRoot(input.agent?.workspaceRoot ?? settings.workspaceRoot)
         })
       : ''
 
@@ -118,13 +119,15 @@ export async function buildPromptPreview(
     filled.push({ ...block, tokens: block.enabled ? await tokenize(block.content) : 0 })
   }
 
-  const toolsTokens =
-    catalogue.openAiTools.length > 0 ? await tokenize(JSON.stringify(catalogue.openAiTools)) : 0
+  // Chat mode sends no `tools` field at all, so reporting the catalogue size
+  // here would misrepresent what the model actually receives.
+  const tools = input.mode === 'agent' ? catalogue.openAiTools : []
+  const toolsTokens = tools.length > 0 ? await tokenize(JSON.stringify(tools)) : 0
 
   return {
     text,
     blocks: filled,
-    toolsCount: catalogue.openAiTools.length,
+    toolsCount: tools.length,
     toolsTokens,
     totalTokens: filled.reduce((sum, block) => sum + block.tokens, 0),
     injectionDisabled

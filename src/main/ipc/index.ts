@@ -3,6 +3,7 @@ import { settingsStore } from '../store/settings'
 import { serverManager } from '../llama/server-manager'
 import { mcpManager } from '../mcp/manager'
 import { emitMcpStatus, emitServerLog, emitServerState, emitSettingsChanged } from './events'
+import { registerAgentHandlers } from './agent'
 import { registerChatHandlers } from './chat'
 import { registerConversationHandlers } from './conversations'
 import { registerMcpHandlers } from './mcp'
@@ -19,6 +20,7 @@ export function registerAllHandlers(): void {
   registerSkillHandlers()
   registerMcpHandlers()
   registerChatHandlers()
+  registerAgentHandlers()
 }
 
 /** Forwards main-process events to the renderer window. */

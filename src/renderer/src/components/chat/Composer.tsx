@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react'
-import { ImagePlus, Send, Square, X } from 'lucide-react'
+import { ImagePlus, Loader2, Send, Square, X } from 'lucide-react'
 import type { Attachment } from '@shared/types'
 import { IconButton } from '@/components/ui'
 import { ModeSwitch } from '@/components/agent/ModeSwitch'
@@ -15,6 +15,7 @@ import {
 import { useImageDataUrl } from '@/hooks/useImageDataUrl'
 import { useT } from '@/i18n'
 import { useChatStore, estimateTokens } from '@/stores/chat'
+import { useAgentSession } from '@/stores/agent-session'
 import { useMcpStore } from '@/stores/mcp'
 import { useModelsStore } from '@/stores/models'
 import { useSettingsStore } from '@/stores/settings'
@@ -54,9 +55,26 @@ function AttachmentChip({
 
 export function Composer(): ReactNode {
   const t = useT()
-  const send = useChatStore((state) => state.send)
-  const abort = useChatStore((state) => state.abort)
-  const streaming = useChatStore((state) => state.stream !== null)
+  const mode = useChatStore((state) => state.conversation?.mode ?? null)
+  const defaultMode = useSettingsStore((state) => state.settings?.agent.defaultMode ?? 'chat')
+  const isAgent = (mode ?? defaultMode) === 'agent'
+
+  // An agent turn and a chat completion are different machines; the input box is
+  // shared, the turn logic is not.
+  const chatSend = useChatStore((state) => state.send)
+  const chatAbort = useChatStore((state) => state.abort)
+  const chatStreaming = useChatStore((state) => state.stream !== null)
+  const chatPreparing = useChatStore((state) => state.preparing)
+
+  const agentSend = useAgentSession((state) => state.send)
+  const agentAbort = useAgentSession((state) => state.abort)
+  const agentStreaming = useAgentSession((state) => state.stream !== null)
+  const agentPreparing = useAgentSession((state) => state.preparing)
+
+  const send = isAgent ? agentSend : chatSend
+  const abort = isAgent ? agentAbort : chatAbort
+  const streaming = isAgent ? agentStreaming : chatStreaming
+  const preparing = isAgent ? agentPreparing : chatPreparing
   const serverState = useChatStore((state) => state.serverState)
   const pushToast = useUiStore((state) => state.pushToast)
 
@@ -77,7 +95,7 @@ export function Composer(): ReactNode {
   // swallow the confirmation keystroke.
   const composingRef = useRef(false)
 
-  const canSend = !streaming && (text.trim().length > 0 || attachments.length > 0)
+  const canSend = !streaming && !preparing && (text.trim().length > 0 || attachments.length > 0)
 
   const prompts = useMcpStore((state) => state.prompts)
   // A lone leading slash opens the MCP prompt menu.
@@ -312,6 +330,14 @@ export function Composer(): ReactNode {
               >
                 <Square className="size-3.5" />
               </button>
+            ) : preparing ? (
+              // The message is already in the transcript; the model is loading.
+              <span
+                title={t('chat.preparing')}
+                className="inline-flex size-8 items-center justify-center rounded-[9px] bg-surface-3 text-brand"
+              >
+                <Loader2 className="size-4 animate-spin" />
+              </span>
             ) : (
               <button
                 type="button"

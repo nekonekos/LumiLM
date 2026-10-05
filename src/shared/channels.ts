@@ -40,6 +40,9 @@ export const CH = {
     approveTool: 'chat:approve-tool'
   },
   agent: {
+    send: 'agent:send',
+    abort: 'agent:abort',
+    approveTool: 'agent:approve-tool',
     previewPrompt: 'agent:preview-prompt'
   },
   mcp: {
@@ -97,6 +100,7 @@ export const CH = {
     serverState: 'event:server-state',
     serverLog: 'event:server-log',
     chatStream: 'event:chat-stream',
+    agentStream: 'event:agent-stream',
     settingsChanged: 'event:settings-changed',
     mcpStatus: 'event:mcp-status',
     toast: 'event:toast'

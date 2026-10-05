@@ -5,7 +5,7 @@ import { settingsStore } from './store/settings'
 import { applyThemeSource, createMainWindow, focusMainWindow } from './window'
 import { registerAllHandlers, wireEventForwarding } from './ipc'
 import { setEventTarget } from './ipc/events'
-import { abortAllStreams } from './ipc/chat'
+import { abortAllStreams } from './ipc/streams'
 import { serverManager } from './llama/server-manager'
 import { mcpManager } from './mcp/manager'
 

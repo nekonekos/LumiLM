@@ -1,7 +1,8 @@
 import { useEffect, type ReactNode } from 'react'
-import { Plug, RefreshCw, RotateCw, Unplug } from 'lucide-react'
+import { FolderOpen, Plug, RefreshCw, RotateCw, Unplug } from 'lucide-react'
 import type { McpServerState, ToolPermission } from '@shared/types'
-import { Badge, Button, EmptyHint, IconButton } from '@/components/ui'
+import { BUILTIN_TOOL_GROUPS } from '@shared/builtin-tools'
+import { Badge, Button, EmptyHint, IconButton, Switch } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import { useT, type MessageKey } from '@/i18n'
 import { useMcpStore } from '@/stores/mcp'
@@ -19,6 +20,88 @@ const STATUS_TONE: Record<McpServerState['status'], 'neutral' | 'brand' | 'succe
   connecting: 'brand',
   ready: 'success',
   error: 'danger'
+}
+
+/**
+ * The built-in tools a user loads on demand. They are off by default, so the
+ * group switches are what actually puts a tool in front of the model.
+ */
+function BuiltinToolsSection(): ReactNode {
+  const t = useT()
+  const settings = useSettingsStore((state) => state.settings)
+  const update = useSettingsStore((state) => state.update)
+  if (!settings) return null
+
+  const agent = settings.agent
+  const groups = [
+    agent.fileToolsEnabled ? BUILTIN_TOOL_GROUPS.file : [],
+    agent.shellToolsEnabled ? BUILTIN_TOOL_GROUPS.shell : []
+  ].flat()
+
+  const pickRoot = async (): Promise<void> => {
+    const directory = await window.lumilm.dialog.pickDirectory()
+    if (directory) await update({ agent: { workspaceRoot: directory } })
+  }
+
+  return (
+    <div className="overflow-hidden rounded-[9px] border border-border">
+      <div className="flex items-center gap-2 bg-surface-2 px-2.5 py-1.5">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-fg">{t('tools.builtin')}</span>
+        <Badge tone={groups.length > 0 ? 'brand' : 'neutral'}>
+          {t('tools.count', { n: groups.length })}
+        </Badge>
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-border px-2.5 py-2">
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={agent.fileToolsEnabled}
+            label={t('settings.agentFileTools')}
+            onChange={(checked) => void update({ agent: { fileToolsEnabled: checked } })}
+          />
+          <span className="flex-1 text-[11px] text-fg">{t('settings.agentFileTools')}</span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={agent.shellToolsEnabled}
+            label={t('settings.agentShellTools')}
+            onChange={(checked) => void update({ agent: { shellToolsEnabled: checked } })}
+          />
+          <span className="flex-1 text-[11px] text-fg">{t('settings.agentShellTools')}</span>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="shrink-0 text-[10px] text-fg-subtle">
+            {t('settings.agentWorkspaceRoot')}
+          </span>
+          <span
+            className="min-w-0 flex-1 truncate font-mono text-[10px] text-fg-muted"
+            title={agent.workspaceRoot ?? t('tools.homeDir')}
+          >
+            {agent.workspaceRoot ?? t('tools.homeDir')}
+          </span>
+          <IconButton label={t('tools.pickRoot')} className="size-6" onClick={() => void pickRoot()}>
+            <FolderOpen className="size-3" />
+          </IconButton>
+        </div>
+
+        {groups.length > 0 ? (
+          <p className="break-all font-mono text-[10px] leading-snug text-fg-subtle">
+            {groups.join(' · ')}
+          </p>
+        ) : (
+          <p className="text-[10px] leading-snug text-warning">{t('tools.noneEnabled')}</p>
+        )}
+
+        {agent.shellToolsEnabled ? (
+          <p className="text-[10px] leading-snug text-fg-subtle">{t('tools.shellWarn')}</p>
+        ) : (
+          <p className="text-[10px] leading-snug text-fg-subtle">{t('tools.builtinHint')}</p>
+        )}
+      </div>
+    </div>
+  )
 }
 
 /** Connected MCP servers plus the tools they expose. */
@@ -44,6 +127,8 @@ export function ToolsPanel(): ReactNode {
 
   return (
     <div className="flex flex-col gap-3">
+      <BuiltinToolsSection />
+
       <div className="flex items-center gap-1.5">
         <span className="flex-1 text-[10px] text-fg-subtle">
           {t('mcp.runtime')}: {runtime?.nodeVersion ?? '—'}

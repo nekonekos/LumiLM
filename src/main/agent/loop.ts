@@ -160,6 +160,7 @@ export async function runAgentTurn(
     }
 
     let planned: PlannedCall[] = result.toolCalls.map((raw) => planNative(raw, catalogue))
+    let assistantContent = result.content
 
     if (planned.length === 0 && input.parseTextToolCalls && result.content.trim().length > 0) {
       const parsed = extractTextToolCalls(result.content, catalogue.isKnownName)
@@ -168,6 +169,19 @@ export async function runAgentTurn(
       )
       if (planned.length > 0) {
         logger.info('agent', `recovered ${planned.length} tool call(s) from text output`)
+        // Keep only the prose the model wrote before the call. The call itself
+        // travels as `tool_calls`, and leaving the raw json in the content made
+        // the template render it twice, which the model then echoed back.
+        assistantContent = parsed.cleaned
+      }
+      if (parsed.unknown.length > 0) {
+        // The model asked for something that is not loaded — the user needs to
+        // see that, otherwise it looks like tool calling is simply broken.
+        logger.warn('agent', `model asked for unloaded tool(s): ${parsed.unknown.join(', ')}`)
+        if (!notices.includes('TOOL_NOT_FOUND')) {
+          notices.push('TOOL_NOT_FOUND')
+          emit({ type: 'notice', streamId, code: 'TOOL_NOT_FOUND' })
+        }
       }
     }
 
@@ -177,6 +191,12 @@ export async function runAgentTurn(
     }
 
     assistant.toolCalls = planned.map((entry) => entry.call)
+    assistant.content = assistantContent
+    if (assistantContent !== result.content) {
+      // The deltas already streamed the invented tail to the renderer, so send
+      // the authoritative text for the block the model actually gets to keep.
+      emit({ type: 'content-reset', streamId, content: assistantContent })
+    }
     appended.push(assistant)
     history.push(assistant)
 
@@ -192,7 +212,7 @@ export async function runAgentTurn(
       emit({ type: 'tool-call', streamId, call, risk })
 
       const startedAt = Date.now()
-      const outcome = await executeCall(entry, risk, reason, input, emit)
+      const outcome = await executeCall(entry, risk, reason, input, emit, signal)
       if (outcome.executed) toolCallCount += 1
 
       const toolResult: ToolCallResult = {
@@ -238,7 +258,8 @@ async function executeCall(
   risk: ToolRisk,
   riskReason: string,
   input: AgentTurnInput,
-  emit: (event: ChatStreamEvent) => void
+  emit: (event: ChatStreamEvent) => void,
+  signal: AbortSignal
 ): Promise<CallOutcome> {
   const { call } = entry
   const { streamId } = input
@@ -295,7 +316,7 @@ async function executeCall(
   }
 
   try {
-    const result = await entry.tool.execute(call.args)
+    const result = await entry.tool.execute(call.args, signal)
     return { executed: true, content: result.content, ok: result.ok, truncated: result.truncated }
   } catch (error) {
     const message = toError(error).message

@@ -127,6 +127,10 @@ tools. Switch the mode selector under the composer to **Agent** when you want it
 | **Chat** (default) | Exactly the old behaviour: only your own system prompt is sent and `tools` never appears in the request |
 | **Agent** | Injects an agent preamble plus tool definitions, and can call tools over several rounds |
 
+Agent mode and plain chat are separate paths: the agent owns its own think → call tool → read
+result loop, its own block-per-step view (not chat bubbles) and its own IPC channel, and
+neither path branches on the other.
+
 Agent mode offers three permission levels: *ask every time*, *ask for risky only* (default)
 and *automatic*.
 
@@ -181,6 +185,66 @@ A plain JSON file (`{ "name": …, "description": …, "systemPrompt": … }`) w
 
 Skills are disclosed in three levels to keep the context small: metadata (always) → body
 (when the model calls `skills.load`) → bundled files (via `skills.read_resource`).
+
+### Built-in tools (loaded on demand)
+
+The model can act without any MCP server. Built-in tools are **off by default**; enable them
+per group in the Tools panel of the Inspector or under *Settings → Agent*:
+
+| Group | Tools | Permission |
+| --- | --- | --- |
+| File tools | `read_file` `write_file` `list_files` `search_files` | reads are read-only; `write_file` asks |
+| Command tool | `run_command` | asks on every call |
+
+- The five definitions cost roughly 300 tokens. For a small local model a lean tool list
+  beats a complete one, so only **enabled** tools reach the model's tool list.
+- The **working directory** bounds the file tools and defaults to your home directory.
+  `run_command` runs a real shell command, and a command can leave that directory, which is
+  why it is rated destructive and always needs an approval.
+- When the model asks for a tool that is not loaded, the UI says so instead of failing
+  silently.
+- Commands time out after 60 seconds, their output is capped, and cancelling a turn kills
+  the whole process tree.
+
+#### How the model calls a tool
+
+Small local models do not use OpenAI's native `tool_calls` field; they write the call as a
+JSON block. So the agent prompt states the convention explicitly and requires the model to
+stop and wait right after writing it:
+
+````json
+{"name": "builtin__list_files", "arguments": {"path": "."}}
+````
+
+- The prompt forbids inventing, describing or summarising a result, and forbids continuing as
+  though the tool had already run.
+- LumiLM parses the call, actually executes it, and hands the real result back as the next
+  message.
+- Parsing is lenient: `name` / `tool` / `tool_name` / `action` / `function` are all accepted,
+  parameters may be nested under `arguments` or flattened next to the name, and `//` comments
+  plus trailing commas are stripped first.
+- **Text after a call is discarded.** Whatever the model writes once it has emitted a call is
+  usually an invented result, so only the prose before the call is kept.
+- When the model asks for a tool that is not loaded, the UI says so instead of failing
+  silently.
+
+### Thinking intensity
+
+Above the agent composer there is a three-position switch — **Unlimited / Brief / Minimal** —
+with a default for new conversations under *Settings → Agent*.
+
+Thinking is real generation time, which hurts most on low-end machines, so LumiLM caps it with
+llama.cpp's `--reasoning-budget` (roughly 256 / 64 tokens) and injects a short nudge to answer
+when the budget runs out.
+
+Two caveats worth knowing:
+
+- The flag only applies at model start-up, so changing the level reloads the model. It is not a
+  request parameter because the mainstream DeepSeek-V3/R1-style templates ignore
+  `enable_thinking` and `reasoning_effort`, a `reasoning_budget` in the request body has no
+  effect, and `/props` does not support runtime changes.
+- The levels **cap** thinking rather than turn it off. A budget of 0 does not remove the
+  reasoning — it leaks it into the visible answer — so LumiLM deliberately offers no "off".
 
 ### Context budget
 

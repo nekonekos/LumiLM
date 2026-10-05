@@ -1,4 +1,5 @@
 import type { KvCacheType } from '@shared/types'
+import { THINKING_BUDGET_MESSAGE } from '@shared/types'
 
 export interface ServerArgsInput {
   modelPath: string
@@ -16,6 +17,12 @@ export interface ServerArgsInput {
   flashAttention: boolean
   useMmap: boolean
   useMlock: boolean
+  /**
+   * Thinking token budget. `undefined` or a non-positive value leaves thinking
+   * unrestricted; 0 is deliberately not emitted because llama.cpp answers it by
+   * dumping the reasoning into the visible content instead of suppressing it.
+   */
+  reasoningBudget?: number
   /** raw additional arguments supplied by the user in the advanced settings */
   extraArgs?: string[]
 }
@@ -94,6 +101,10 @@ export function buildServerArgs(input: ServerArgsInput): string[] {
   if (input.useMlock) args.push('--mlock')
   if (input.mmprojPath) args.push('--mmproj', input.mmprojPath)
   if (input.alias && input.alias.trim().length > 0) args.push('--alias', input.alias.trim())
+  if (input.reasoningBudget !== undefined && input.reasoningBudget > 0) {
+    args.push('--reasoning-budget', String(input.reasoningBudget))
+    args.push('--reasoning-budget-message', THINKING_BUDGET_MESSAGE)
+  }
   if (input.extraArgs && input.extraArgs.length > 0) args.push(...input.extraArgs)
 
   return args

@@ -37,7 +37,7 @@ export function Inspector(): ReactNode {
           tabs={[
             { value: 'sampling', label: t('params.sampling') },
             { value: 'runtime', label: t('params.runtime') },
-            { value: 'system', label: t('params.systemPrompt') },
+            { value: 'system', label: t('params.promptTab') },
             { value: 'context', label: t('agent.contextTitle') },
             { value: 'skills', label: t('skills.title') },
             { value: 'tools', label: t('mcp.tools') }

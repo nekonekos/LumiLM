@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChatView } from '@/components/chat/ChatView'
+import { AgentView } from '@/components/agent/AgentView'
 import { Inspector } from '@/components/inspector/Inspector'
 import { LogViewer } from '@/components/logs/LogViewer'
 import { Onboarding } from '@/components/onboarding/Onboarding'
@@ -41,6 +42,10 @@ export function App(): ReactNode {
 
   const sidebarWidth = useSettingsStore((state) => state.settings?.ui.sidebarWidth ?? 268)
   const settingsReady = useSettingsStore((state) => state.settings !== null)
+  const defaultMode = useSettingsStore((state) => state.settings?.agent.defaultMode ?? 'chat')
+
+  const conversationMode = useChatStore((state) => state.conversation?.mode ?? null)
+  const isAgent = (conversationMode ?? defaultMode) === 'agent'
 
   const models = useModelsStore((state) => state.models)
   const modelCount = models.length
@@ -126,7 +131,7 @@ export function App(): ReactNode {
         )}
 
         <main className="flex min-w-0 flex-1 flex-col">
-          <ChatView />
+          {isAgent ? <AgentView /> : <ChatView />}
         </main>
 
         {inspectorCollapsed ? null : <Inspector />}

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
-import type { AppSettings, DeepPartial } from '@shared/types'
-import { DEFAULT_AGENT_PREAMBLE } from '@shared/types'
+import type { AgentSettings, AppSettings, DeepPartial } from '@shared/types'
+import { DEFAULT_AGENT_PREAMBLE, SUPERSEDED_AGENT_PREAMBLES } from '@shared/types'
 import { readJsonSync, writeJsonAtomicSync } from '../util/atomic-json'
 import { logger, toError } from '../util/logger'
 import { ensureDataDirs, getPaths, setDataDirOverride } from './paths'
@@ -51,13 +51,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agent: {
     defaultMode: 'chat',
     permission: 'ask-risky',
+    thinking: 'unlimited',
     maxIterations: 6,
     maxToolResultChars: 8000,
     toolSchemaTokenWarn: 1500,
     injectPrompt: true,
     preambleTemplate: DEFAULT_AGENT_PREAMBLE,
     parseTextToolCalls: true,
-    workspaceToolsEnabled: false,
+    fileToolsEnabled: false,
+    shellToolsEnabled: false,
     workspaceRoot: null,
     allowRemoteMcp: false
   },
@@ -102,9 +104,40 @@ export function deepMerge<T>(base: T, patch: unknown): T {
   return result as T
 }
 
+/** Compares prompt text without caring about the line endings of the source file. */
+function sameTemplate(a: string, b: string): boolean {
+  return a.replace(/\r\n/g, '\n') === b.replace(/\r\n/g, '\n')
+}
+
 /** Fills in any missing key so an older settings file keeps working after an update. */
-function normalize(stored: unknown): AppSettings {
-  return deepMerge(DEFAULT_SETTINGS, stored)
+export function normalizeSettings(stored: unknown): { settings: AppSettings; migrated: boolean } {
+  const raw = isPlainObject(stored) ? stored : {}
+  const settings = deepMerge(DEFAULT_SETTINGS, stored)
+  let migrated = false
+
+  const legacy = settings.agent as AgentSettings & { workspaceToolsEnabled?: boolean }
+  // 0.2.0 exposed a single `workspaceToolsEnabled` switch; it now covers only
+  // the file tools. Dropping the key keeps it from being written back forever.
+  if (legacy.workspaceToolsEnabled !== undefined) {
+    if (legacy.workspaceToolsEnabled) settings.agent.fileToolsEnabled = true
+    delete legacy.workspaceToolsEnabled
+    migrated = true
+  }
+
+  // The preamble is a copy of whatever default shipped when the file was first
+  // written, so changing the default alone would never reach an existing
+  // install. A preamble the user edited never matches and is left alone.
+  const storedAgent = isPlainObject(raw.agent) ? raw.agent : {}
+  const storedPreamble = storedAgent.preambleTemplate
+  if (
+    typeof storedPreamble === 'string' &&
+    SUPERSEDED_AGENT_PREAMBLES.some((template) => sameTemplate(template, storedPreamble))
+  ) {
+    settings.agent.preambleTemplate = DEFAULT_AGENT_PREAMBLE
+    migrated = true
+  }
+
+  return { settings, migrated }
 }
 
 class SettingsStore extends EventEmitter {
@@ -117,7 +150,8 @@ class SettingsStore extends EventEmitter {
     ensureDataDirs()
     const file = getPaths().settingsFile
     const raw = readJsonSync<unknown>(file)
-    this.settings = normalize(raw)
+    const { settings, migrated } = normalizeSettings(raw)
+    this.settings = settings
 
     if (this.settings.general.dataDir && existsSync(this.settings.general.dataDir)) {
       setDataDirOverride(this.settings.general.dataDir)
@@ -127,6 +161,10 @@ class SettingsStore extends EventEmitter {
       this.settings.general.dataDir = null
       setDataDirOverride(null)
     }
+
+    // Write the migrated shape back once, so the stale keys disappear from disk
+    // even if the user never changes a setting.
+    if (migrated) this.save()
 
     return this.settings
   }

@@ -68,6 +68,9 @@ function ReasoningPanel({ text, defaultOpen }: { text: string; defaultOpen: bool
   )
 }
 
+const EMPTY_RESULTS: Record<string, ToolCallResult> = {}
+const EMPTY_DECISIONS: Record<string, ApprovalDecision> = {}
+
 export interface MessageBubbleProps {
   message: ChatMessage
   layout: 'bubble' | 'document'
@@ -78,11 +81,11 @@ export interface MessageBubbleProps {
   streamReasoning?: string
   streamToolCalls?: ToolCall[]
   /** tool results keyed by call id */
-  toolResults: Record<string, ToolCallResult>
+  toolResults?: Record<string, ToolCallResult>
   /** resolved approvals keyed by call id */
-  approvals: Record<string, ApprovalDecision>
+  approvals?: Record<string, ApprovalDecision>
   /** the call the approval dialog is currently showing */
-  approvalCallId: string | null
+  approvalCallId?: string | null
   canAct: boolean
   onRegenerate: (messageId: string) => void
   onEdit: (messageId: string, content: string) => void
@@ -129,9 +132,9 @@ export const MessageBubble = memo(function MessageBubble({
   streamContent,
   streamReasoning,
   streamToolCalls,
-  toolResults,
-  approvals,
-  approvalCallId,
+  toolResults = EMPTY_RESULTS,
+  approvals = EMPTY_DECISIONS,
+  approvalCallId = null,
   canAct,
   onRegenerate,
   onEdit,

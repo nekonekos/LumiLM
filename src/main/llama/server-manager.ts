@@ -15,6 +15,7 @@ import { modelLibrary } from '../gguf/scanner'
 import { settingsStore } from '../store/settings'
 import { logger, toError } from '../util/logger'
 import { buildServerArgs, redactArgs, splitArgs } from './args'
+import { THINKING_BUDGETS, type AgentThinking } from '@shared/types'
 import { computeRecommendation, degradeRecommendation } from './auto-tune'
 import { chooseBackend, probeBackends, resolveBackend, runProcess } from './backend'
 import { LlamaClient } from './client'
@@ -47,6 +48,7 @@ export function createInitialState(): ServerState {
     degradedRetries: 0,
     commandLine: null,
     supportsTools: null,
+    thinking: 'unlimited',
     metrics: null
   }
 }
@@ -100,6 +102,7 @@ interface StartConfig {
   mmprojPath: string | null
   extraArgs: string[]
   alias: string
+  thinking: AgentThinking
 }
 
 function pickNumber(
@@ -127,6 +130,10 @@ class ServerManager extends EventEmitter {
   private llamaClient: LlamaClient | null = null
   private apiKey = ''
   private starting = false
+  /** the in-flight load, awaited by any caller that arrives while it runs */
+  private loadPromise: Promise<ServerState> | null = null
+  /** which model that in-flight load is for */
+  private pendingModelId: string | null = null
   private stopRequested = false
   private cancelRequested = false
   private idleTimer: NodeJS.Timeout | null = null
@@ -276,7 +283,8 @@ class ServerManager extends EventEmitter {
       executable: resolved.executable,
       mmprojPath,
       extraArgs: splitArgs(options.extraArgs ?? inference.extraArgs ?? ''),
-      alias: model.fileName.replace(/\.gguf$/i, '')
+      alias: model.fileName.replace(/\.gguf$/i, ''),
+      thinking: options.thinking ?? settingsStore.get().agent.thinking
     }
   }
 
@@ -298,6 +306,7 @@ class ServerManager extends EventEmitter {
       flashAttention: recommendation.flashAttention,
       useMmap: recommendation.useMmap,
       useMlock: recommendation.useMlock,
+      reasoningBudget: THINKING_BUDGETS[config.thinking],
       extraArgs: config.extraArgs
     })
 
@@ -384,14 +393,38 @@ class ServerManager extends EventEmitter {
   }
 
   async load(options: LoadOptions = {}): Promise<ServerState> {
-    if (this.starting) throw new Error('SERVER_BUSY')
+    // A second load request while one is already running used to fail with
+    // SERVER_BUSY, which meant a message sent during start-up was silently
+    // dropped. Waiting for the in-flight load instead makes that send succeed.
+    if (this.starting) {
+      if (!this.loadPromise) throw new Error('SERVER_BUSY')
+      const pending = this.pendingModelId
+      if (options.modelId && pending && options.modelId !== pending) {
+        throw new Error('SERVER_BUSY')
+      }
+      return this.loadPromise
+    }
+
     this.starting = true
+    this.pendingModelId = options.modelId ?? null
+    this.loadPromise = this.runLoad(options)
+    try {
+      return await this.loadPromise
+    } finally {
+      this.starting = false
+      this.loadPromise = null
+      this.pendingModelId = null
+    }
+  }
+
+  private async runLoad(options: LoadOptions): Promise<ServerState> {
     this.cancelRequested = false
 
     try {
       if (this.child) await this.stopInternal()
 
       const config = await this.resolveStartConfig(options)
+      this.pendingModelId = config.model.id
       this.setState({ status: 'starting', error: null, progress: 0.02 })
 
       let lastError: string | null = null
@@ -443,7 +476,8 @@ class ServerManager extends EventEmitter {
             gpuLayers: attempt.recommendation.gpuLayers,
             totalLayers: attempt.recommendation.totalLayers,
             kvCacheType: attempt.recommendation.kvCacheType,
-            supportsTools: extractToolSupport(props)
+            supportsTools: extractToolSupport(props),
+            thinking: attempt.thinking
           })
 
           modelLibrary.markUsed(config.model.id)
@@ -487,8 +521,6 @@ class ServerManager extends EventEmitter {
         this.setState({ status: 'error', error: message, progress: null })
       }
       throw error
-    } finally {
-      this.starting = false
     }
   }
 

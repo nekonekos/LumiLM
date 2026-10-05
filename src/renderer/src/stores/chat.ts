@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type {
-  AgentNoticeCode,
+  AgentThinking,
   Attachment,
   ChatMessage,
   ChatRequest,
@@ -14,7 +14,6 @@ import type {
 } from '@shared/types'
 import { createInitialServerState } from '@/lib/server-state'
 import { translate, type MessageKey } from '@/i18n'
-import { useAgentStore } from './agent'
 import { useModelsStore } from './models'
 import { useSettingsStore } from './settings'
 import { useUiStore } from './ui'
@@ -36,6 +35,8 @@ interface ChatState {
   metas: ConversationMeta[]
   conversation: Conversation | null
   stream: StreamState | null
+  /** true while a send is waiting for the model to finish loading */
+  preparing: boolean
   serverState: ServerState
   loading: boolean
   lastTrimmed: number
@@ -58,7 +59,7 @@ interface ChatState {
   regenerate: (messageId: string) => Promise<void>
   abort: () => Promise<void>
   handleStreamEvent: (event: ChatStreamEvent) => void
-  ensureLoaded: () => Promise<{ ok: boolean; message?: string }>
+  ensureLoaded: (thinking?: AgentThinking) => Promise<{ ok: boolean; message?: string }>
 }
 
 const ERROR_CODES: MessageKey[] = [
@@ -68,14 +69,6 @@ const ERROR_CODES: MessageKey[] = [
   'error.SERVER_BUSY',
   'error.SERVER_NOT_READY'
 ]
-
-/** Non-fatal agent conditions that are surfaced as toasts. */
-const NOTICE_KEYS: Record<AgentNoticeCode, MessageKey> = {
-  MAX_ITERATIONS: 'agent.noticeMaxIterations',
-  CONTEXT_EXHAUSTED: 'agent.noticeContextExhausted',
-  CONTEXT_TRIMMED: 'agent.noticeContextTrimmed',
-  TOOLS_UNSUPPORTED: 'agent.noticeToolsUnsupported'
-}
 
 function translateErrorCode(locale: 'zh-CN' | 'en-US', message: string): string {
   const key = ERROR_CODES.find((candidate) => candidate.slice('error.'.length) === message)
@@ -125,7 +118,7 @@ export function trimMessages(
   return { kept, trimmed: messages.length - kept.length }
 }
 
-function buildRequestMessages(
+export function buildRequestMessages(
   conversation: Conversation,
   contextSize: number | null
 ): { messages: ChatRequestMessage[]; trimmed: number; imageCount: number } {
@@ -255,7 +248,16 @@ export const useChatStore = create<ChatState>((set, get) => {
   async function startStream(conversation: Conversation, assistantId: string): Promise<void> {
     const locale = useSettingsStore.getState().settings?.general.locale ?? 'zh-CN'
 
-    const readiness = await get().ensureLoaded()
+    // Loading a multi-gigabyte model takes a while; without this the composer
+    // looks dead and a second send would race the in-flight load.
+    set({ preparing: true })
+    let readiness: { ok: boolean; message?: string }
+    try {
+      readiness = await get().ensureLoaded()
+    } finally {
+      set({ preparing: false })
+    }
+
     if (!readiness.ok) {
       useUiStore.getState().pushToast({
         kind: 'warning',
@@ -299,8 +301,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       systemPrompt: conversation.systemPrompt,
       messages,
       sampling: conversation.sampling,
-      mode: conversation.mode,
-      agent: conversation.agent
+      mode: 'chat'
     }
 
     try {
@@ -315,6 +316,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     metas: [],
     conversation: null,
     stream: null,
+    preparing: false,
     serverState: createInitialServerState(),
     loading: false,
     lastTrimmed: 0,
@@ -409,7 +411,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     send: async (text, attachments) => {
-      if (get().stream) return
+      if (get().stream || get().preparing) return
       const trimmedText = text.trim()
       if (trimmedText.length === 0 && attachments.length === 0) return
 
@@ -534,102 +536,6 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
           break
 
-        case 'iteration': {
-          // Iteration 0 continues the placeholder the caller already created.
-          if (event.index === 0) break
-          flush()
-          const conversation = get().conversation
-          const current = get().stream
-          if (!conversation || !current) break
-
-          const sealed = conversation.messages.map((message) =>
-            message.id === current.messageId
-              ? {
-                  ...message,
-                  content: current.content,
-                  reasoning: current.reasoning.length > 0 ? current.reasoning : undefined,
-                  toolCalls: current.toolCalls.length > 0 ? current.toolCalls : undefined,
-                  updatedAt: Date.now()
-                }
-              : message
-          )
-
-          const nextAssistant: ChatMessage = {
-            id: nextId('assistant'),
-            role: 'assistant',
-            content: '',
-            createdAt: Date.now(),
-            modelId: conversation.modelId ?? undefined
-          }
-          const next: Conversation = { ...conversation, messages: [...sealed, nextAssistant] }
-
-          resetPending()
-          set({
-            conversation: next,
-            stream: {
-              ...current,
-              messageId: nextAssistant.id,
-              content: '',
-              reasoning: '',
-              toolCalls: [],
-              iteration: event.index
-            }
-          })
-          void persist(next)
-          break
-        }
-
-        case 'tool-call': {
-          const current = get().stream
-          if (!current) break
-          set({ stream: { ...current, toolCalls: [...current.toolCalls, event.call] } })
-          break
-        }
-
-        case 'tool-result': {
-          const conversation = get().conversation
-          if (!conversation) break
-          const toolMessage: ChatMessage = {
-            id: nextId('tool'),
-            role: 'tool',
-            content: event.result.content,
-            toolCallId: event.callId,
-            createdAt: Date.now(),
-            toolResult: event.result
-          }
-          const next: Conversation = {
-            ...conversation,
-            messages: [...conversation.messages, toolMessage]
-          }
-          // The tool message must be part of the assistant block already in the
-          // store, so the pairing survives a reload mid-turn.
-          set({ conversation: next })
-          void persist(next)
-          break
-        }
-
-        case 'approval-request':
-          useAgentStore.getState().requestApproval({
-            callId: event.call.id,
-            call: event.call,
-            risk: event.risk,
-            reason: event.reason
-          })
-          break
-
-        case 'approval-resolved':
-          useAgentStore.getState().resolveApproval(event.callId, event.decision)
-          break
-
-        case 'notice': {
-          const locale = useSettingsStore.getState().settings?.general.locale ?? 'zh-CN'
-          useUiStore.getState().pushToast({
-            kind: event.code === 'CONTEXT_EXHAUSTED' ? 'warning' : 'info',
-            message: translate(locale, NOTICE_KEYS[event.code])
-          })
-          break
-        }
-
         case 'done':
           void finalize(event.stats, false)
           break
@@ -650,15 +556,25 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    ensureLoaded: async () => {
+    ensureLoaded: async (thinking) => {
       const model = useModelsStore.getState().activeModel()
       if (!model) return { ok: false }
 
       const server = get().serverState
-      if (server.status === 'ready' && server.modelId === model.id) return { ok: true }
+      const desired =
+        thinking ?? useSettingsStore.getState().settings?.agent.thinking ?? 'unlimited'
+      // The thinking budget is a launch argument, so a different level needs a
+      // fresh llama-server rather than just a different request.
+      if (
+        server.status === 'ready' &&
+        server.modelId === model.id &&
+        server.thinking === desired
+      ) {
+        return { ok: true }
+      }
 
       try {
-        await window.lumilm.server.load({ modelId: model.id })
+        await window.lumilm.server.load({ modelId: model.id, thinking: desired })
         return { ok: true }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)

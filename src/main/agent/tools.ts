@@ -9,12 +9,39 @@ import {
   type OpenAiTool
 } from '../mcp/registry'
 import { skillRegistry } from '../skills/registry'
-import { WORKSPACE_TOOL_DEFS } from '../tools/workspace'
+import { FILE_TOOL_DEFS, effectiveWorkspaceRoot } from '../tools/workspace'
+import { SHELL_TOOL_DEFS } from '../tools/shell'
+import type { BuiltinToolDef } from '../tools/types'
 
 export const SKILL_LOAD_TOOL = 'builtin__skills_load'
 export const SKILL_RESOURCE_TOOL = 'builtin__skills_read_resource'
 
 const MAX_SKILL_BODY_CHARS = 20_000
+
+/**
+ * Wraps one built-in definition as a catalogue entry. Truncation happens here so
+ * every built-in tool honours `maxToolResultChars`.
+ */
+function resolveBuiltin(def: BuiltinToolDef, root: string, maxChars: number): ResolvedTool {
+  return {
+    name: `${BUILTIN_TOOL_PREFIX}${def.toolName}`,
+    kind: 'workspace',
+    serverId: null,
+    toolName: def.toolName,
+    description: def.description,
+    risk: def.risk,
+    riskReason:
+      def.risk === 'destructive'
+        ? 'built-in tool that changes files or runs a command'
+        : 'built-in read-only tool',
+    schema: def.inputSchema,
+    async execute(args, signal) {
+      const result = await def.run(root, args, signal)
+      const { text, truncated } = truncateMiddle(result.content, maxChars)
+      return { content: result.ok ? text : `[tool error]\n${text}`, ok: result.ok, truncated }
+    }
+  }
+}
 
 export interface ToolExecution {
   content: string
@@ -177,25 +204,14 @@ export function buildToolCatalogue(overrides: AgentOverrides | undefined): ToolC
     }
   }
 
-  if (settings.agent.workspaceToolsEnabled && settings.agent.workspaceRoot) {
-    const root = settings.agent.workspaceRoot
-    for (const def of WORKSPACE_TOOL_DEFS) {
-      tools.push({
-        name: `${BUILTIN_TOOL_PREFIX}${def.toolName}`,
-        kind: 'workspace',
-        serverId: null,
-        toolName: def.toolName,
-        description: def.description,
-        risk: def.risk,
-        riskReason: 'built-in workspace tool',
-        schema: def.inputSchema,
-        async execute(args) {
-          const result = await def.run(root, args)
-          const { text, truncated } = truncateMiddle(result.content, settings.agent.maxToolResultChars)
-          return { content: result.ok ? text : `[tool error]\n${text}`, ok: result.ok, truncated }
-        }
-      })
-    }
+  if (settings.agent.fileToolsEnabled || settings.agent.shellToolsEnabled) {
+    const root = effectiveWorkspaceRoot(overrides?.workspaceRoot ?? settings.agent.workspaceRoot)
+    const maxChars = settings.agent.maxToolResultChars
+    const defs = [
+      ...(settings.agent.fileToolsEnabled ? FILE_TOOL_DEFS : []),
+      ...(settings.agent.shellToolsEnabled ? SHELL_TOOL_DEFS : [])
+    ]
+    for (const def of defs) tools.push(resolveBuiltin(def, root, maxChars))
   }
 
   const allowed = collectAllowedPatterns(skills)

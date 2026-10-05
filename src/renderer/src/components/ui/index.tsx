@@ -550,7 +550,7 @@ export function Tabs<T extends string>({
   onChange: (value: T) => void
 }): ReactNode {
   return (
-    <div className="flex gap-1 rounded-[11px] bg-surface-3 p-1" role="tablist">
+    <div className="lm-scroll-x flex gap-1 rounded-[11px] bg-surface-3 p-1" role="tablist">
       {tabs.map((tab) => (
         <button
           key={tab.value}
@@ -559,7 +559,10 @@ export function Tabs<T extends string>({
           aria-selected={value === tab.value}
           onClick={() => onChange(tab.value)}
           className={cn(
-            'flex-1 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors',
+            // `min-w-fit` + `nowrap` keep the labels on one line: when they no
+            // longer fit, the strip scrolls instead of wrapping CJK glyphs into
+            // a column. With few tabs `flex-1` still fills the width.
+            'min-w-fit flex-1 rounded-[8px] px-2 py-1.5 text-xs font-medium whitespace-nowrap transition-colors',
             value === tab.value
               ? 'bg-surface text-fg shadow-[0_1px_2px_rgb(0_0_0/0.08)]'
               : 'text-fg-muted hover:text-fg'

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useAgentSession } from '@/stores/agent-session'
 import { useChatStore } from '@/stores/chat'
 import { useMcpStore } from '@/stores/mcp'
 import { useModelsStore } from '@/stores/models'
@@ -30,6 +31,9 @@ export function useBootstrap(): BootstrapState {
     const unsubscribe = [
       window.lumilm.events.onServerState((state) => chat.setServerState(state)),
       window.lumilm.events.onChatStream((event) => chat.handleStreamEvent(event)),
+      window.lumilm.events.onAgentStream((event) =>
+        useAgentSession.getState().handleEvent(event)
+      ),
       window.lumilm.events.onSettingsChanged((next) => settings.applyFromEvent(next)),
       window.lumilm.events.onMcpStatus((servers) => {
         useMcpStore.getState().setServers(servers)
